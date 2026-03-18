@@ -111,19 +111,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
-
-// Редирект с корня и /clientapp на главную страницу (иначе белый экран)
-app.Use(async (context, next) =>
-{
-    var path = context.Request.Path.Value?.TrimEnd('/') ?? "";
-    if (path == "" || path == "/clientapp")
-    {
-        context.Response.Redirect("/clientapp/map.html", permanent: false);
-        return;
-    }
-    await next();
-});
+// В Docker слушаем только HTTP (80), HTTPS не настроен — редирект отключаем
+if (app.Environment.IsDevelopment())
+    app.UseHttpsRedirection();
 
 var clientappPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "clientapp"));
 if (Directory.Exists(clientappPath))
@@ -135,9 +125,14 @@ if (Directory.Exists(clientappPath))
     });
 }
 
-app.UseSession(); // ����������� middleware ��� ������ � ��������
+app.UseSession();
 app.UseAuthorization();
 app.MapControllers();
+
+// Редирект с корня на главную страницу приложения
+app.MapGet("/", () => Results.Redirect("/clientapp/map.html", false));
+app.MapGet("/clientapp", () => Results.Redirect("/clientapp/map.html", false));
+app.MapGet("/clientapp/", () => Results.Redirect("/clientapp/map.html", false));
 
 app.Run();
 
