@@ -1,7 +1,8 @@
-﻿using MapApi.Context;
+using MapApi.Context;
 using MapApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
 using Npgsql;
 using System.Net.Http;
@@ -14,13 +15,15 @@ namespace MapApi.Controllers
     {
         private readonly ApplicationContext _context;
         private readonly HttpClient _httpClient;
-        private readonly string _connectionString = "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
+        private readonly string _connectionString;
 
-        public CommentController(ApplicationContext context, HttpClient httpClient)
+        public CommentController(ApplicationContext context, HttpClient httpClient, IConfiguration configuration)
         {
             _context = context;
             _httpClient = httpClient;
             _httpClient.Timeout = TimeSpan.FromSeconds(100000);
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
+                ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
         }
         
         //Получение комментариев, добавленных за 5 последних дней

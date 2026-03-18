@@ -1,5 +1,6 @@
-﻿using MapApi.Context;
+using MapApi.Context;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
 using MapApi.Models;
 using System.Web;
@@ -13,8 +14,15 @@ namespace MapApi.Controllers
     [Route("api/admin")]
     public class AdminController : ControllerBase
     {
-        private readonly string _connectionString = "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
+        private readonly string _connectionString;
         private readonly ApplicationContext _context;
+
+        public AdminController(ApplicationContext context, IConfiguration configuration)
+        {
+            _context = context;
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
+                ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
+        }
 
         // Получение параметров рекомендательной системы
         [HttpGet("GetSettings")]
