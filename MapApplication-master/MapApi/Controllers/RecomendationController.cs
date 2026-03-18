@@ -1,8 +1,9 @@
-﻿using AngleSharp.Io;
+using AngleSharp.Io;
 using MapApi.Context;
 using MapApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
 using Npgsql;
 using System;
@@ -20,14 +21,15 @@ namespace MapApi.Controllers
     public class RecommendationController : ControllerBase
     {
         private readonly ApplicationContext _context;
-        private readonly string _connectionString = "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
+        private readonly string _connectionString;
         private readonly HttpClient _httpClient;
 
-
-        public RecommendationController(ApplicationContext context, HttpClient httpClient)
+        public RecommendationController(ApplicationContext context, HttpClient httpClient, IConfiguration configuration)
         {
             _context = context;
             _httpClient = httpClient;
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
+                ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
         }
 
         // Метод для получения параметров для генерации рекомендаций
