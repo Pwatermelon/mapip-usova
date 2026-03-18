@@ -112,11 +112,15 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseStaticFiles(new StaticFileOptions
+var clientappPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "clientapp"));
+if (Directory.Exists(clientappPath))
 {
-    FileProvider = new PhysicalFileProvider(@"D:\MAPIP\MapApplication-master\clientapp"),
-    RequestPath = "/clientapp"
-});
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(clientappPath),
+        RequestPath = "/clientapp"
+    });
+}
 
 app.UseSession(); // ����������� middleware ��� ������ � ��������
 app.UseAuthorization();
