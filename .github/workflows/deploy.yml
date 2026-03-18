@@ -1,5 +1,5 @@
-# Сборка Docker-образа и деплой через docker-compose на сервер
-name: Build and Deploy
+# Деплой: копируем код на сервер, сборка и запуск через docker-compose на хосте
+name: Deploy (build on host)
 
 on:
   push:
@@ -7,47 +7,22 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-push:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare Docker context (clientapp inside MapApi for Dockerfile)
+      - name: Prepare Docker context (clientapp inside MapApi)
         run: cp -r MapApplication-master/clientapp MapApplication-master/MapApi/
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Docker image tag (lowercase for ghcr.io)
-        id: tag
-        run: echo "tag=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest" >> $GITHUB_OUTPUT
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: MapApplication-master/MapApi
-          file: MapApplication-master/MapApi/Dockerfile
-          push: true
-          tags: ${{ steps.tag.outputs.tag }}
-
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Prepare docker-compose for deploy
+      - name: Pack project (exclude junk)
         run: |
-          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest"
-          sed "s|IMAGE_PLACEHOLDER|$IMAGE|g" MapApplication-master/docker-compose.deploy.yml > docker-compose.deploy.yml
+          tar --exclude='MapApplication-master/clientapp/node_modules' \
+              --exclude='MapApplication-master/MapApi/clientapp/node_modules' \
+              --exclude='MapApplication-master/MapApi/bin' \
+              --exclude='MapApplication-master/MapApi/obj' \
+              --exclude='.git' \
+              -czf deploy.tar.gz MapApplication-master
 
       - name: Create directory on server
         uses: appleboy/ssh-action@v1.0.3
@@ -58,22 +33,26 @@ jobs:
           script: mkdir -p ${{ secrets.DEPLOY_PATH }}
         continue-on-error: true
 
-      - name: Copy docker-compose to server
+      - name: Copy archive to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "docker-compose.deploy.yml"
+          source: "deploy.tar.gz"
           target: ${{ secrets.DEPLOY_PATH }}
         continue-on-error: true
 
-      - name: Run docker-compose on server
+      - name: Build and run on server (docker-compose build + up)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd ${{ secrets.DEPLOY_PATH }} && docker-compose -f docker-compose.deploy.yml pull && docker-compose -f docker-compose.deploy.yml up -d
+            cd ${{ secrets.DEPLOY_PATH }}
+            tar -xzf deploy.tar.gz
+            cd MapApplication-master
+            docker-compose build --no-cache
+            docker-compose up -d
         continue-on-error: true
