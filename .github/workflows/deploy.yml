@@ -63,5 +63,5 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd ${{ secrets.DEPLOY_PATH }} && (sudo systemctl restart mapapi || true)
+            sudo systemctl restart mapapi || true
         continue-on-error: true
