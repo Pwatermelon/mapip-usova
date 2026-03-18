@@ -37,15 +37,36 @@
   <main>
     <div class="router-panel" style="max-width: 1400px; margin: 0 auto; padding: 20px;">
       <h1>Маршрутизатор</h1>
-      <p style="margin-bottom: 20px; color: #555;">Маршруты, по которым есть данные о доступности, отображаются одним цветом; маршруты без данных — другим.</p>
+      <p style="margin-bottom: 20px; color: #555;">Участки маршрута, рядом с которыми есть объекты из нашей базы (данные о доступности), отображаются зелёным; участки без объектов рядом — оранжевым.</p>
+      <div class="router-build-panel" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; margin-bottom: 16px;">
+        <div>
+          <label for="route-from" style="display: block; margin-bottom: 4px; font-weight: 600;">Откуда</label>
+          <input type="text" id="route-from" placeholder="Адрес или место" style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px;">
+        </div>
+        <div>
+          <label for="route-to" style="display: block; margin-bottom: 4px; font-weight: 600;">Куда</label>
+          <input type="text" id="route-to" placeholder="Адрес или место" style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px;">
+        </div>
+        <div>
+          <label for="route-profile" style="display: block; margin-bottom: 4px; font-weight: 600;">Профиль</label>
+          <select id="route-profile" style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px;">
+            <option value="foot-walking">Пешеход</option>
+            <option value="wheelchair">Колясочник</option>
+          </select>
+        </div>
+        <div>
+          <button type="button" id="build-route-btn" style="padding: 8px 20px; background: #007bff; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">Построить маршрут</button>
+        </div>
+      </div>
+      <div id="route-result" style="margin-bottom: 12px; min-height: 24px;"></div>
       <div class="router-legend" style="display: flex; gap: 24px; margin-bottom: 16px; flex-wrap: wrap;">
         <span style="display: flex; align-items: center; gap: 8px;">
           <span style="display: inline-block; width: 24px; height: 4px; background: #28a745; border-radius: 2px;"></span>
-          <strong>Есть данные о доступности</strong>
+          <strong>На маршруте есть объекты из базы</strong>
         </span>
         <span style="display: flex; align-items: center; gap: 8px;">
           <span style="display: inline-block; width: 24px; height: 4px; background: #fd7e14; border-radius: 2px;"></span>
-          <strong>Нет данных</strong>
+          <strong>На маршруте нет объектов</strong>
         </span>
       </div>
       <div id="map" style="height: 500px; border-radius: 12px; border: 1px solid #ddd;"></div>
