@@ -1,0 +1,18 @@
+[Unit]
+Description=MAPIP MapApi (ASP.NET)
+After=network.target postgresql.service
+
+[Service]
+Type=notify
+WorkingDirectory=/var/www/mapapi
+ExecStart=/usr/bin/dotnet /var/www/mapapi/MapApi.dll
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://+:80
+# Строка подключения к БД (подставь свои значения)
+Environment=ConnectionStrings__DefaultConnection=Host=localhost;Port=5432;Username=postgres;Password=12345;Database=Map
+
+[Install]
+WantedBy=multi-user.target

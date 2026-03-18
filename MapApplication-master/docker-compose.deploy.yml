@@ -1,0 +1,35 @@
+# Для деплоя: образ подставляется из GitHub Actions (ghcr.io/owner/repo:latest)
+# Локально используй обычный docker-compose.yml с build
+version: '3.8'
+
+services:
+  mapapi:
+    image: IMAGE_PLACEHOLDER
+    ports:
+      - "5000:80"
+    depends_on:
+      - db
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Username=postgres;Password=12345;Database=Map
+    networks:
+      - backend
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: map
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+
+networks:
+  backend:
+volumes:
+  postgres-data:
