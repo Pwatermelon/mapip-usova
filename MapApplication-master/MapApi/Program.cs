@@ -19,7 +19,19 @@ builder.Services.AddDbContext<ApplicationContext>(options =>
     options.UseNpgsql(connection);
 });
 
-// ��������� Quartz
+// Создаём таблицы при первом запуске и добавляем настройки по умолчанию
+using (var scope = builder.Services.BuildServiceProvider().CreateScope())
+{
+    var ctx = scope.ServiceProvider.GetRequiredService<ApplicationContext>();
+    ctx.Database.EnsureCreated();
+    if (!ctx.AdminSettings.Any())
+    {
+        ctx.AdminSettings.Add(new MapApi.Models.AdminSetting { CronExpression = "0 */5 * * * ?" });
+        ctx.SaveChanges();
+    }
+}
+
+// Настройка Quartz
 builder.Services.AddQuartz(q =>
 {
     q.UseMicrosoftDependencyInjectionJobFactory();
@@ -29,20 +41,24 @@ builder.Services.AddQuartz(q =>
         .WithIdentity(jobKey)
         .StoreDurably());
 
-    // ���������� cron-��������� �� ���� ������
+    // Читаем cron-выражение из БД (если таблица ещё не создана — используем значение по умолчанию)
     string cronExpression = null;
-
-    using (var dbConnection = new NpgsqlConnection(connection))
+    try
     {
-        dbConnection.Open();
-        using (var command = new NpgsqlCommand("SELECT \"CronExpression\" FROM public.\"AdminSettings\" LIMIT 1", dbConnection))
+        using (var dbConnection = new NpgsqlConnection(connection))
         {
-            var result = command.ExecuteScalar();
-            if (result != null)
+            dbConnection.Open();
+            using (var command = new NpgsqlCommand("SELECT \"CronExpression\" FROM public.\"AdminSettings\" LIMIT 1", dbConnection))
             {
-                cronExpression = result.ToString();
+                var result = command.ExecuteScalar();
+                if (result != null)
+                    cronExpression = result.ToString();
             }
         }
+    }
+    catch
+    {
+        // Таблицы ещё нет (EnsureCreated не вызывался) — будет использовано значение по умолчанию ниже
     }
 
     // �������� �������� � ����������� cron-����������
