@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Добавить информацию</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-geosearch@3.5.0/dist/geosearch.umd.js"></script>
+    <style>
+        #map {
+            height: 400px;
+            margin: 10px 0;
+        }
+        .search-container {
+            position: relative;
+            margin-bottom: 10px;
+        }
+        .search-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .search-suggestions {
+            position: absolute;
+            z-index: 1000;
+            width: 100%;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-top: none;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .search-suggestion {
+            padding: 8px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+        }
+        .search-suggestion:hover {
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo">
+          <img src="Dostupnaya_sreda.png" alt="Логотип" class="logo-image">
+        </div>
+        <h1 class="mainZag">Сделаем с Вами мир доступнее</h1>
+        <div class="login-icon">
+          <a href="http://localhost:5000/clientapp/authorization.html" id="logoutButton">Выйти</a>
+          <button id="accessibilityButton">Версия для слабовидящих</button>
+        </div>
+    </div>
+
+    <header>
+        <nav>
+          <ul class="menuUpper">
+            <li><a href="map.html">Карта доступности</a></li>
+            <li><a href="moderation.html" class="active">Добавить информацию</a></li>
+            <li><a href="edit.html">Редактировать информацию</a></li>
+            <li><a href="router.html">Маршрутизатор</a></li>
+            <li><a href="expert-panel.html">Панель эксперта</a></li>
+            <li><a href="statistics.html">Статистика</a></li>
+            <li><a href="about.html">О проекте</a></li>
+          </ul>
+        </nav>
+    </header>
+    
+    <main>
+        <div id="score-container">
+            Накоплено очков: <span id="score-value"></span>
+        </div>
+
+        <section class="content">
+            <h2>Добавить объект городской среды</h2>
+            <p>Здесь Вы можете помочь нам наполнить нашу карту свежими данными</p>
+        </section>
+
+        <div class="settings">
+            <form id="addObjectForm">
+                <h4 for="type">Тип объекта:</h4>
+                <select id="type" name="type" required>
+                    <option value="Транспортная инфраструктура">Объект транспортной инфраструктуры</option>
+                    <option value="Дорожная инфраструктура">Объект дорожной инфраструктуры</option>
+                    <option value="Социальная инфраструктура">Объект социальной инфраструктуры</option>
+                </select><br>
+
+                <h4 for="name">Название объекта:</h4>
+                <input type="text" id="name" name="name" required><br>
+       
+                <div id="mapForAddress">
+                    <h4 for="address">Адрес:</h4>
+                    <input type="checkbox" id="useCurrentLocation">
+                    <label for="useCurrentLocation">Использовать текущее местоположение</label>
+                    <div class="search-container">
+                        <input type="text" id="addressInput" class="search-input" placeholder="Введите адрес">
+                        <div id="suggestions" class="search-suggestions"></div>
+                    </div>
+                    <div id="map"></div>
+                    <input type="hidden" id="address" name="address" required>
+                    <input type="hidden" id="latitude" name="latitude">
+                    <input type="hidden" id="longitude" name="longitude">
+                </div>
+
+                <div id="socialInfrastructureFields" style="display: none;">
+                    <h4 for="type">Тип объекта:</h4>
+                    <div id="container-for_category"></div>
+
+                    <h4 for="description">Описание:</h4>
+                    <textarea id="description" name="description"></textarea>
+
+                    <h4 for="accessibility">Элементы доступной среды:</h4>
+                    <div id="accessibilityContainer"></div>
+
+                    <h4>Категории инвалидности:</h4>
+                    <div class="checkbox-container-out">
+                        <div class="checkbox-container">
+                            <div>
+                                <input type="checkbox" id="disabilityCategoryG" name="disabilityCategory" value="Г">
+                                <label for="disabilityCategoryG">Для людей с нарушением слуха</label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="disabilityCategoryK" name="disabilityCategory" value="К">
+                                <label for="disabilityCategoryK">Для инвалидов, передвигающихся на коляске</label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="disabilityCategoryO" name="disabilityCategory" value="О">
+                                <label for="disabilityCategoryO">Для людей с нарушением опорнодвигательного аппарата</label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="disabilityCategoryS" name="disabilityCategory" value="С">
+                                <label for="disabilityCategoryS">Для людей с нарушением зрения</label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="disabilityCategoryU" name="disabilityCategory" value="У">
+                                <label for="disabilityCategoryU">Для людей с нарушением умственного развития</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h4 for="workingHours">График работы:</h4>
+                    <input type="text" id="workingHours" name="workingHours"><br>
+                </div>
+
+                <h4 for="images">Изображения объекта:</h4>
+                <input type="file" id="images" name="images" multiple><br>
+
+                <div class="buttons">
+                    <button type="button" onclick="submitForm()">Отправить</button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <footer>
+        <p>Контактная информация: 123-456-7890 | email@example.com</p>
+    </footer>
+    <script src="./js/current_user.js"></script>
+    <script src="./js/moderation.js"></script>
+</body>
+</html>

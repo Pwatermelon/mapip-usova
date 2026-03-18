@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление пользователями</title>
+    <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo">
+            <img src="Dostupnaya_sreda.png" alt="Логотип" class="logo-image">
+        </div>
+        <h1 class="mainZag">Сделаем с Вами мир доступнее</h1>
+        <div class="login-icon">
+            <a href="#login" id="logoutButton">Выйти</a>
+        </div>
+    </div>
+
+    <header>
+        <nav>
+          <ul class="menuUpper">
+            <li><a href="http://localhost:5000/clientapp/settings.html">Настройки рекомендательной системы</a></li>
+            <li><a href="http://localhost:5000/clientapp/adminComments.html">Модерация комментариев</a></li>
+            <li><a href="http://localhost:5000/clientapp/adminUsers.html">Управление пользователями</a></li>
+            <li><a href="http://localhost:5000/clientapp/expert-panel.html" class="active">Панель эксперта</a></li>
+            <li><a href="http://localhost:5000/clientapp/statistics.html">Статистика</a></li>
+            <li><a href="http://localhost:5000/clientapp/about.html">О проекте</a></li>
+          </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section class="content">
+            <h2>Настройки Администратора</h2>
+            <p>Здесь Вы можете управлять данными Пользователей</p>
+        </section>
+    </main>
+
+    <div class="con">
+        <div class="settings admin">
+            <div class="buttons">
+                <form onsubmit="event.preventDefault();" role="search" class="search-form">
+                    <input id="search-inner" type="search" placeholder="Поиск Пользователя по e-mail..." class="search-input" autofocus required />
+                    <button id="search-inner-button" type="submit" class="search-button">Найти</button>
+                </form>
+            </div>
+            
+            <div id="user-container"></div>
+            
+            <div id="loading-spinner" style="display: none;">
+                <div class="spinner"></div>
+                <p class = 'messageCom'>Загрузка данных Пользователя...</p>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="./js/current_user.js"></script>
+    <script src="./js/usersAdmin.js"></script>
+</body>
+</html>

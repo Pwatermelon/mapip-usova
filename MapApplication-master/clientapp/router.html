@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Маршрутизатор — данные о доступности</title>
+  <link rel="stylesheet" href="./css/styles.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</head>
+<body>
+  <div class="top-bar">
+    <div class="logo">
+      <img src="Dostupnaya_sreda.png" alt="Логотип" class="logo-image">
+    </div>
+    <h1 class="mainZag">Сделаем с Вами мир доступнее</h1>
+    <div class="login-icon">
+      <a href="authorization.html" id="logoutButton">Выйти</a>
+      <button id="accessibilityButton">Версия для слабовидящих</button>
+    </div>
+  </div>
+
+  <header>
+    <nav>
+      <ul class="menuUpper">
+        <li><a href="map.html">Карта доступности</a></li>
+        <li><a href="moderation.html">Добавить информацию</a></li>
+        <li><a href="edit.html">Редактировать информацию</a></li>
+        <li><a href="router.html" class="active">Маршрутизатор</a></li>
+        <li><a href="expert-panel.html">Панель эксперта</a></li>
+        <li><a href="statistics.html">Статистика</a></li>
+        <li><a href="about.html">О проекте</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main>
+    <div class="router-panel" style="max-width: 1400px; margin: 0 auto; padding: 20px;">
+      <h1>Маршрутизатор</h1>
+      <p style="margin-bottom: 20px; color: #555;">Маршруты, по которым есть данные о доступности, отображаются одним цветом; маршруты без данных — другим.</p>
+      <div class="router-legend" style="display: flex; gap: 24px; margin-bottom: 16px; flex-wrap: wrap;">
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 24px; height: 4px; background: #28a745; border-radius: 2px;"></span>
+          <strong>Есть данные о доступности</strong>
+        </span>
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 24px; height: 4px; background: #fd7e14; border-radius: 2px;"></span>
+          <strong>Нет данных</strong>
+        </span>
+      </div>
+      <div id="map" style="height: 500px; border-radius: 12px; border: 1px solid #ddd;"></div>
+      <div id="routes-list" style="margin-top: 20px; text-align: left;"></div>
+    </div>
+  </main>
+
+  <script src="js/router.js"></script>
+</body>
+</html>

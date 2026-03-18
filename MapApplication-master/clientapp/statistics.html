@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статистика</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo">
+            <img src="Dostupnaya_sreda.png" alt="Логотип" class="logo-image">
+        </div>
+        <h1 class="mainZag">Сделаем с Вами мир доступнее</h1>
+        <div class="login-icon">
+            <a href="#login" id="logoutButton">Выйти</a>
+        </div>
+    </div>
+
+    <header>
+        <nav>
+          <ul class="menuUpper">
+            <li><a href="map.html">Карта доступности</a></li>
+            <li><a href="moderation.html">Добавить информацию</a></li>
+            <li><a href="edit.html">Редактировать информацию</a></li>
+            <li><a href="router.html">Маршрутизатор</a></li>
+            <li><a href="expert-panel.html">Панель эксперта</a></li>
+            <li><a href="statistics.html" class="active">Статистика</a></li>
+            <li><a href="about.html">О проекте</a></li>
+          </ul>
+        </nav>
+    </header>
+
+    <main>
+        <div class="statistics-panel">
+            <h1>Статистика</h1>
+            <div class="stats-container">
+                <div class="stats-card">
+                    <h3>Ожидающие модерации</h3>
+                    <div id="pending-count">0</div>
+                </div>
+                <div class="stats-card">
+                    <h3>Добавленные объекты</h3>
+                    <div id="added-count">0</div>
+                </div>
+                <div class="stats-card">
+                    <h3>Удаленные объекты</h3>
+                    <div id="deleted-count">0</div>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="objectsChart"></canvas>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/statistics.js"></script>
+</body>
+</html> 

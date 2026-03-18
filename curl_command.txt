@@ -1,0 +1,80 @@
+curl -X 'PUT' \
+  'http://localhost:5000/api/Expert/3/edit' \
+  -H 'accept: */*' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "id": 0,
+  "displayName": "string",
+  "address": "string",
+  "x": 0,
+  "y": 0,
+  "type": "string",
+  "description": "string",
+  "disabilityCategory": "string",
+  "workingHours": "string",
+  "images": "string",
+  "accessibility": "string",
+  "excluded": true,
+  "mapObjectID": 0,
+  "dateAdded": "2025-05-19T14:23:50.013Z",
+  "updated": "2025-05-19T14:23:50.013Z",
+  "status": "string",
+  "userId": 0,
+  "user": {
+    "id": 0,
+    "name": "string",
+    "type": 0,
+    "email": "string",
+    "password": "string",
+    "score": 0,
+    "listRoutes": [
+      {
+        "id": 0,
+        "date": "string",
+        "userId": 0,
+        "listObjects": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "display_name": "string",
+            "iri": "string",
+            "adress": "string",
+            "description": "string",
+            "images": "string",
+            "type": "string",
+            "rating": 0,
+            "workingHours": "string",
+            "createdAt": "2025-05-19T14:23:50.013Z",
+            "updatedAt": "2025-05-19T14:23:50.013Z",
+            "recommendation": [
+              {
+                "userID": 0,
+                "mapObjectID": 0
+              }
+            ],
+            "favorites": [
+              {
+                "userID": 0,
+                "mapObjectID": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "recommendations": [
+      {
+        "userID": 0,
+        "mapObjectID": 0
+      }
+    ],
+    "favorites": [
+      {
+        "userID": 0,
+        "mapObjectID": 0
+      }
+    ],
+    "pendingSocialMapObjects": []
+  }
+}' 
