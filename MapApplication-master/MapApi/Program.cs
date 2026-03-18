@@ -112,6 +112,19 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Редирект с корня и /clientapp на главную страницу (иначе белый экран)
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value?.TrimEnd('/') ?? "";
+    if (path == "" || path == "/clientapp")
+    {
+        context.Response.Redirect("/clientapp/map.html", permanent: false);
+        return;
+    }
+    await next();
+});
+
 var clientappPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "clientapp"));
 if (Directory.Exists(clientappPath))
 {

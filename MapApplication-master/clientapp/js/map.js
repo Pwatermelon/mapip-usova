@@ -1,4 +1,4 @@
-const apiUrl = 'http://localhost:5000/GetSocialMapObject';
+const apiUrl = '/GetSocialMapObject';
 let recommendationsArray = []; 
 const map = L.map('map').setView([51.533557, 46.034257], 15);
 
@@ -73,7 +73,7 @@ document.getElementById("load-comments-of-search").addEventListener("click", asy
   
     try {
       const encodedQuery = encodeURIComponent(query);
-      const response = await fetch(`http://localhost:5000/api/SocialMapObject/SearchBy/?search=${encodedQuery}`);
+      const response = await fetch(`/api/SocialMapObject/SearchBy/?search=${encodedQuery}`);
         if (!response.ok) {
             throw new Error("Ошибка при получении данных.");
         }
@@ -107,7 +107,7 @@ document.addEventListener('click', event => {
         const containerComment = document.getElementById('commentForm');
         containerComment.innerHTML = '';
         if (button.innerText === 'Показать комментарии') {
-            axios.get(`http://localhost:5000/api/comment/GetCommentsByMapObject/${idObj}`)
+            axios.get(`/api/comment/GetCommentsByMapObject/${idObj}`)
                 .then(response => {
                     container.innerHTML = '';
                     const comments = response.data;
@@ -351,7 +351,7 @@ function highlightStars(commentId, rating) {
 // Проверка объекта находится ли он в Избранном
 async function checkIfFavorite(mapObjectId, userId) {
     try {
-        const response = await fetch(`http://localhost:5000/api/users/GetLikesByUserId/${userId}`);
+        const response = await fetch(`/api/users/GetLikesByUserId/${userId}`);
         if (!response.ok) return false;
 
         const favorites = await response.json();
@@ -365,7 +365,7 @@ async function checkIfFavorite(mapObjectId, userId) {
 // Переключатель лайка
 async function toggleFavorite(mapObjectId, userId, element) {
     const isFavorite = element.classList.contains('heart-filled');
-    const endpoint = isFavorite ? 'http://localhost:5000/api/users/RemoveFavorite' : 'http://localhost:5000/api/users/AddFavorite';
+    const endpoint = isFavorite ? '/api/users/RemoveFavorite' : '/api/users/AddFavorite';
 
     try {
         const formData = new FormData();
@@ -442,7 +442,7 @@ function showBlock(blockId) {
 
 // Открыть детали
 function showDetails(id) {
-    fetch(`http://localhost:5000/api/SocialMapObject/GetSocialMapObjectById/${id}`)
+    fetch(`/api/SocialMapObject/GetSocialMapObjectById/${id}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`Ошибка HTTP: ${response.status}`);
@@ -502,7 +502,7 @@ function closeFilter() {
 
 // Загрузка рекомендаций для всех пользователей
 function fetchPopularRecommendations() {
-    axios.get(`http://localhost:5000/api/recommendation/GetPopularRecommendations`)
+    axios.get(`/api/recommendation/GetPopularRecommendations`)
     .then(response => {
         const recommendations = response.data.map(rec => {
             return Object.fromEntries(
@@ -559,7 +559,7 @@ function fetchRecommendationsByUserId() {
         block.appendChild(buttons);
         return;
     }
-    axios.get(`http://localhost:5000/api/recommendation/GetRecommendationsByUserId/${userId}`)
+    axios.get(`/api/recommendation/GetRecommendationsByUserId/${userId}`)
     .then(response => {
         const recommendations = response.data.map(rec => {
             return Object.fromEntries(
@@ -603,7 +603,7 @@ function fetchRecommendationsByUserId() {
 
 // Удаление рекомендации из списка
 function removeRecommendation(mapObjectId, userId) {
-    axios.delete(`http://localhost:5000/api/recommendation/RemoveRecommendation/${mapObjectId}/${userId}`)
+    axios.delete(`/api/recommendation/RemoveRecommendation/${mapObjectId}/${userId}`)
         .then(() => fetchRecommendationsByUserId())
         .catch(error => console.error(error));
 }
@@ -640,8 +640,8 @@ function fetchRecommendationsFiltering() {
     }
 
     const API = flag 
-        ? `http://localhost:5000/api/recommendation/GetFilteringIntersectedData`
-        : `http://localhost:5000/api/recommendation/GetFilteringPopularData`;
+        ? `/api/recommendation/GetFilteringIntersectedData`
+        : `/api/recommendation/GetFilteringPopularData`;
 
     axios.post(API, filterOptions)
         .then(response => {
@@ -703,7 +703,7 @@ async function sortRecommendationsByDistance() {
     try {
         const userLocation = await getUserLocation();
         console.log(recommendationsArray);
-        const response = await fetch(`http://localhost:5000/api/recommendation/SortRecommendations`, {
+        const response = await fetch(`/api/recommendation/SortRecommendations`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -791,7 +791,7 @@ async function sendComment(data, uniqueId) {
     loadingSpinner.style.display = 'flex';
     try {
         console.log(data);
-        const response = await fetch('http://localhost:5000/api/comment/AddComment', {
+        const response = await fetch('/api/comment/AddComment', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -834,7 +834,7 @@ async function confirmComment(modifiedText, rate, mapObjectId) {
     };
 
     try {
-        const response = await fetch('http://localhost:5000/api/comment/AddComment', {
+        const response = await fetch('/api/comment/AddComment', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
