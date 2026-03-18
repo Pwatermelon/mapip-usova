@@ -49,6 +49,15 @@ jobs:
           IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest"
           sed "s|IMAGE_PLACEHOLDER|$IMAGE|g" MapApplication-master/docker-compose.deploy.yml > docker-compose.deploy.yml
 
+      - name: Create directory on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: mkdir -p ${{ secrets.DEPLOY_PATH }}
+        continue-on-error: true
+
       - name: Copy docker-compose to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -66,7 +75,5 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd ${{ secrets.DEPLOY_PATH }}
-            docker compose -f docker-compose.deploy.yml pull
-            docker compose -f docker-compose.deploy.yml up -d
+            cd ${{ secrets.DEPLOY_PATH }} && docker-compose -f docker-compose.deploy.yml pull && docker-compose -f docker-compose.deploy.yml up -d
         continue-on-error: true
