@@ -13,7 +13,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
 
 var connection = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=Map";
+    ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
 builder.Services.AddDbContext<ApplicationContext>(options =>
 {
     options.UseNpgsql(connection);

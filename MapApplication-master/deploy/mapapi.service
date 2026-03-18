@@ -12,7 +12,7 @@ KillSignal=SIGINT
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=ASPNETCORE_URLS=http://+:80
 # Строка подключения к БД (подставь свои значения)
-Environment=ConnectionStrings__DefaultConnection=Host=localhost;Port=5432;Username=postgres;Password=12345;Database=Map
+Environment=ConnectionStrings__DefaultConnection=Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map
 
 [Install]
 WantedBy=multi-user.target
