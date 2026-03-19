@@ -1,4 +1,4 @@
-const apiUrl = 'http://localhost:5000/api/admin';
+const apiUrl = '/api/admin';
 
 let excludedCategories = [];
 

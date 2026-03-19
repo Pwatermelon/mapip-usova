@@ -2,15 +2,26 @@
 version: '3.8'
 
 services:
-  mapapi:
+  webapi:
     build: ./MapApi
-    ports:
-      - "5000:80"
     depends_on:
       - db
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Username=postgres;Password=12345;Database=map
+    ports:
+      - "5000:80"
+    networks:
+      - backend
+
+  flask:
+    build: ./FlaskApi
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://postgres:12345@db:5432/map
+    expose:
+      - "5001"
     networks:
       - backend
 
@@ -30,5 +41,6 @@ services:
 
 networks:
   backend:
+
 volumes:
   postgres-data:

@@ -29,7 +29,7 @@ namespace MapApi.Controllers
             _context = context;
             _httpClient = httpClient;
             _connectionString = configuration.GetConnectionString("DefaultConnection")
-                ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
+                ?? "Host=db;Port=5432;Username=postgres;Password=12345;Database=map";
         }
 
         // Метод для получения параметров для генерации рекомендаций
@@ -73,7 +73,7 @@ namespace MapApi.Controllers
         // Метод для получения всех рекомендаций коллаборативной фильтрации
         private async Task<Dictionary<int, List<string>>> GetAllRecommendationsCollab()
         {
-            var recommendationsResponse = await _httpClient.GetAsync("http://localhost:5001/recommendations/recommend_all");
+            var recommendationsResponse = await _httpClient.GetAsync("http://flask:5001/recommendations/recommend_all");
             if (!recommendationsResponse.IsSuccessStatusCode)
             {
                 throw new Exception($"Error fetching recommendations: {await recommendationsResponse.Content.ReadAsStringAsync()}");

@@ -21,7 +21,7 @@ namespace MapApi.Controllers
         {
             _context = context;
             _connectionString = configuration.GetConnectionString("DefaultConnection")
-                ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
+                ?? "Host=db;Port=5432;Username=postgres;Password=12345;Database=map";
         }
 
         // Получение параметров рекомендательной системы

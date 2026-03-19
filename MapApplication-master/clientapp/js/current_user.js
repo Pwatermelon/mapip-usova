@@ -64,7 +64,7 @@ document.getElementById('accessibilityButton').addEventListener('click', toggleA
 // Функция для определения текущего пользователя
 async function getCurrentUser() {
     try {
-        const response = await fetch('http://localhost:5000/api/users/current-user', {
+        const response = await fetch('/api/users/current-user', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json'
@@ -116,7 +116,7 @@ async function initialize() {
             registerButton.textContent = 'Войти';
             registerButton.onclick = function(e) {
                 e.preventDefault(); 
-                window.location.replace('http://localhost:5000/clientapp/authorization.html');
+                window.location.replace('/clientapp/authorization.html');
             };
     
             buttons.appendChild(registerButton);
@@ -134,7 +134,7 @@ async function initialize() {
             block.innerHTML = `
                 <p>Доступно только для зарегистрированных пользователей!</p>
                 <div class="buttons">
-                    <button onclick="window.location.replace('http://localhost:5000/clientapp/authorization.html')">Войти</button>
+                    <button onclick="window.location.replace('/clientapp/authorization.html')">Войти</button>
                 </div>
             `;
         }
@@ -146,12 +146,12 @@ document.getElementById('logoutButton').addEventListener('click', async (e) => {
     e.preventDefault();
 
     if (!userId) {
-        window.location.href = 'http://localhost:5000/clientapp/authorization.html';
+        window.location.href = '/clientapp/authorization.html';
         return;
     }
 
     try {
-        const response = await fetch('http://localhost:5000/api/users/logout', {
+        const response = await fetch('/api/users/logout', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json'
@@ -161,7 +161,7 @@ document.getElementById('logoutButton').addEventListener('click', async (e) => {
 
         if (response.ok) {
             console.log('Пользователь вышел.');
-            window.location.href = 'http://localhost:5000/clientapp/authorization.html';
+            window.location.href = '/clientapp/authorization.html';
         } else {
             alert('Ошибка при выходе из системы.');
         }

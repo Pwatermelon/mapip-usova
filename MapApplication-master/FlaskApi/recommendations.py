@@ -7,7 +7,8 @@ import os
 import pickle
 
 # Подключение к базе данных
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:12345@localhost:5432/map')
+# docker-compose хост PostgreSQL называется `db`, поэтому дефолт тоже должен быть `db`.
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:12345@db:5432/map')
 engine = create_engine(DATABASE_URL)
 
 recommendations_bp = Blueprint('recommendations', __name__)

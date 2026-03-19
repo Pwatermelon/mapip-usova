@@ -1,4 +1,4 @@
-const apiUrl = 'http://localhost:5000/api/comment';
+const apiUrl = '/api/comment';
 const container = document.getElementById('user-container');
 container.innerHTML = "<p class = 'messageCom'>Здесь будут отображены Данные Пользователя...</p>";
 
@@ -8,7 +8,7 @@ function fetchUser(email) {
     const loadingSpinner = document.getElementById('loading-spinner');
 
     loadingSpinner.style.display = 'flex';
-    axios.get(`http://localhost:5000/api/users/GetUser/${email}`)
+    axios.get(`/api/users/GetUser/${email}`)
         .then(response => {
             const user = response.data;
             
@@ -66,7 +66,7 @@ function saveData(id) {
     const category = parseInt(document.getElementById(`category-${id}`).value, 10);
     const password = document.getElementById(`password-${id}`).value;
     if (email && !isNaN(category)) {
-        axios.put(`http://localhost:5000/api/users/EditUser/${id}`, { 
+        axios.put(`/api/users/EditUser/${id}`, { 
             email: email, 
             category: category,
             password: password 

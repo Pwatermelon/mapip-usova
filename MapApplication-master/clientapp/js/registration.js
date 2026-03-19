@@ -15,7 +15,7 @@ form.addEventListener('submit', async (e) => {
     }
 
     try {
-        const response = await fetch('http://localhost:5000/api/users/AddUser', {
+        const response = await fetch('/api/users/AddUser', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -26,7 +26,7 @@ form.addEventListener('submit', async (e) => {
         if (response.ok) {
             
             try {
-                const response = await fetch('http://localhost:5000/api/users/login', {
+                const response = await fetch('/api/users/login', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -38,7 +38,7 @@ form.addEventListener('submit', async (e) => {
                         const data = await response.json();
         
                         if (data.success) {
-                            window.location.href = 'http://localhost:5000/clientapp/map.html';
+                            window.location.href = '/clientapp/map.html';
                                
                         } else {
                             errorMessage.textContent = data.message || 'Ошибка авторизации';

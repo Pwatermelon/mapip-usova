@@ -23,7 +23,7 @@ namespace MapApi.Controllers
             _httpClient = httpClient;
             _httpClient.Timeout = TimeSpan.FromSeconds(100000);
             _connectionString = configuration.GetConnectionString("DefaultConnection")
-                ?? "Host=localhost;Port=5432;Username=postgres;Password=12345;Database=map";
+                ?? "Host=db;Port=5432;Username=postgres;Password=12345;Database=map";
         }
         
         //Получение комментариев, добавленных за 5 последних дней
@@ -44,7 +44,7 @@ namespace MapApi.Controllers
         public async Task<IActionResult> AddComment([FromBody] Comment comment)
         {
             Console.WriteLine(comment.UserId);
-            var response = await _httpClient.PostAsJsonAsync("http://localhost:5001/comments/replace_comment", new { comment = comment.Text });
+            var response = await _httpClient.PostAsJsonAsync("http://flask:5001/comments/replace_comment", new { comment = comment.Text });
             if (!response.IsSuccessStatusCode)
             {
                 return StatusCode((int)response.StatusCode, new { message = "Ошибка при обработке комментария" });
@@ -218,7 +218,7 @@ namespace MapApi.Controllers
                 }
             }
 
-            var response = await _httpClient.PostAsJsonAsync("http://localhost:5001/comments/check_comments", result);
+            var response = await _httpClient.PostAsJsonAsync("http://flask:5001/comments/check_comments", result);
 
             if (response.IsSuccessStatusCode)
             {

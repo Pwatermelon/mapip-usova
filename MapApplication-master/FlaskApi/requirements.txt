@@ -1,0 +1,10 @@
+flask
+sqlalchemy
+psycopg2-binary
+pandas
+spacy
+scikit-learn==1.5.2
+surprise
+pymorphy2
+numpy<2.0
+

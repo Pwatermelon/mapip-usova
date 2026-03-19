@@ -246,7 +246,7 @@ document.getElementById("search").addEventListener("input", async function (even
 
     try {
         const encodedQuery = encodeURIComponent(query);
-        const response = await fetch(`http://localhost:5000/api/SocialMapObject/SearchBy/?search=${encodedQuery}`);
+        const response = await fetch(`/api/SocialMapObject/SearchBy/?search=${encodedQuery}`);
         if (!response.ok) {
             throw new Error("Ошибка при получении данных.");
         }

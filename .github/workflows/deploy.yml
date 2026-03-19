@@ -21,6 +21,7 @@ jobs:
               --exclude='MapApplication-master/MapApi/clientapp/node_modules' \
               --exclude='MapApplication-master/MapApi/bin' \
               --exclude='MapApplication-master/MapApi/obj' \
+              --exclude='MapApplication-master/FlaskApi/venv' \
               --exclude='.git' \
               -czf deploy.tar.gz MapApplication-master
 
@@ -53,7 +54,7 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             tar -xzf deploy.tar.gz
             cd MapApplication-master
-            docker-compose down || true
+            docker-compose down --remove-orphans || true
             docker-compose build --no-cache
             docker-compose up -d
         continue-on-error: true

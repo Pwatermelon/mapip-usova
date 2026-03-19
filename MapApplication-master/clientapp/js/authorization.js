@@ -8,7 +8,7 @@ form.addEventListener('submit', async (e) => {
     const password = document.getElementById('password').value;
 
     try {
-        const response = await fetch('http://localhost:5000/api/users/login', {
+        const response = await fetch('/api/users/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -21,10 +21,10 @@ form.addEventListener('submit', async (e) => {
 
                 if (data.success) {
                     if (data.userId === 1)
-                        {window.location.href = 'http://localhost:5000/clientapp/Settings.html';
+                        {window.location.href = '/clientapp/Settings.html';
                         }
                     else
-                        {window.location.href = 'http://localhost:5000/clientapp/map.html';
+                        {window.location.href = '/clientapp/map.html';
                         }
                 } else {
                     errorMessage.textContent = data.message || 'Ошибка авторизации';

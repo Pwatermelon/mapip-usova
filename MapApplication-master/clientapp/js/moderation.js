@@ -45,7 +45,7 @@ if (attributionControl) {
 
 async function loadInfrastructureElements() {
     try {
-        const response = await fetch(`http://localhost:5000/api/admin/get/infrastructure`);
+        const response = await fetch(`/api/admin/get/infrastructure`);
         const data = await response.json();
         const container = document.getElementById('container-for_category');
         container.innerHTML = '';
@@ -166,7 +166,7 @@ function submitForm() {
         disabilityCategoryCheckboxes.forEach(checkbox => formData.append("disabilityCategory", checkbox.value));
     }
 
-    fetch("http://localhost:5000/client/AddMapObject", {
+    fetch("/client/AddMapObject", {
         method: "POST",
         body: formData
     })

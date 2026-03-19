@@ -1,4 +1,4 @@
-const apiUrl = 'http://localhost:5000/api/comment';
+const apiUrl = '/api/comment';
 const container = document.getElementById('comments-container');
 container.innerHTML = "<p class = 'messageCom'>Здесь будут отображены комментарии...</p>";
 
