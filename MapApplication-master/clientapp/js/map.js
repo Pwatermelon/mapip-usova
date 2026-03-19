@@ -852,4 +852,149 @@ async function confirmComment(modifiedText, rate, mapObjectId) {
     }
 }
 
+// ---- Проложить маршрут (в меню карты) ----
+let routeLayersOnMap = [];
+const ROUTE_COLOR_WITH_DATA = '#28a745';
+const ROUTE_COLOR_NO_DATA = '#fd7e14';
+const ROUTE_OBJECT_RADIUS_M = 80;
+
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function isPointNearObjects(lat, lon, radiusM) {
+  if (!objects || !Array.isArray(objects)) return false;
+  for (const o of objects) {
+    const oLat = o.x != null ? o.x : o.X;
+    const oLon = o.y != null ? o.y : o.Y;
+    if (oLat == null || oLon == null) continue;
+    if (distanceMeters(lat, lon, oLat, oLon) <= radiusM) return true;
+  }
+  return false;
+}
+
+async function nominatimGeocode(address) {
+  const q = encodeURIComponent(String(address).trim());
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, { headers: { 'Accept-Language': 'ru' } });
+  if (!res.ok) throw new Error('Ошибка геокодирования');
+  const data = await res.json();
+  if (!data || data.length === 0) throw new Error('Адрес не найден: ' + address);
+  return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+}
+
+async function buildRouteOnMap(fromCoord, toCoord, profile) {
+  const res = await fetch('/api/routebuild/Build', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ From: fromCoord, To: toCoord, Profile: profile || 'foot-walking' })
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(JSON.parse(text).error || text || 'Ошибка построения маршрута');
+  return JSON.parse(text);
+}
+
+function clearRouteOnMap() {
+  routeLayersOnMap.forEach(l => { try { map.removeLayer(l); } catch (_) {} });
+  routeLayersOnMap = [];
+}
+
+function drawRouteSegmentsOnMap(coords) {
+  clearRouteOnMap();
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = coords[i];
+    const b = coords[i + 1];
+    const midLat = (a[0] + b[0]) / 2;
+    const midLon = (a[1] + b[1]) / 2;
+    const hasData = isPointNearObjects(midLat, midLon, ROUTE_OBJECT_RADIUS_M);
+    const color = hasData ? ROUTE_COLOR_WITH_DATA : ROUTE_COLOR_NO_DATA;
+    const line = L.polyline([a, b], { color, weight: 5, opacity: 0.8 }).addTo(map);
+    routeLayersOnMap.push(line);
+  }
+  if (coords.length >= 2) map.fitBounds(L.latLngBounds(coords).pad(0.15));
+}
+
+function searchObjectsForRoute(query) {
+  if (!objects || !Array.isArray(objects)) return [];
+  const q = String(query).toLowerCase().trim();
+  if (!q) return [];
+  return objects.filter(obj => {
+    const name = (obj.display_name || '').toLowerCase();
+    const addr = (obj.adress || obj.address || '').toLowerCase();
+    return name.includes(q) || addr.includes(q);
+  });
+}
+
+function setupRouteAddressAutocomplete(inputId, suggestionsId) {
+  const input = document.getElementById(inputId);
+  const container = document.getElementById(suggestionsId);
+  if (!input || !container) return;
+  input.addEventListener('input', function () {
+    container.innerHTML = '';
+    const results = searchObjectsForRoute(this.value);
+    results.slice(0, 8).forEach(obj => {
+      const div = document.createElement('div');
+      div.className = 'search-suggestion';
+      div.textContent = (obj.display_name || '') + (obj.adress ? ' — ' + obj.adress : '');
+      div.addEventListener('click', () => {
+        input.value = (obj.display_name || '') + (obj.adress ? ', ' + obj.adress : '');
+        input.dataset.lat = obj.x != null ? obj.x : obj.X;
+        input.dataset.lon = obj.y != null ? obj.y : obj.Y;
+        container.innerHTML = '';
+      });
+      container.appendChild(div);
+    });
+  });
+  document.addEventListener('click', function (e) {
+    if (!container.contains(e.target) && e.target !== input) container.innerHTML = '';
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  setupRouteAddressAutocomplete('addressX', 'suggestionsX');
+  setupRouteAddressAutocomplete('addressY', 'suggestionsY');
+
+  const btn = document.getElementById('routeBuildButton');
+  const addressX = document.getElementById('addressX');
+  const addressY = document.getElementById('addressY');
+  const typeRoute = document.getElementById('typeRoute');
+  if (!btn || !addressX || !addressY) return;
+
+  btn.addEventListener('click', async function () {
+    const fromText = addressX.value.trim();
+    const toText = addressY.value.trim();
+    if (!fromText || !toText) {
+      alert('Укажите «Откуда» и «Куда».');
+      return;
+    }
+    let fromCoord = null;
+    let toCoord = null;
+    if (addressX.dataset.lat != null && addressX.dataset.lon != null)
+      fromCoord = [parseFloat(addressX.dataset.lat), parseFloat(addressX.dataset.lon)];
+    if (addressY.dataset.lat != null && addressY.dataset.lon != null)
+      toCoord = [parseFloat(addressY.dataset.lat), parseFloat(addressY.dataset.lon)];
+    if (!fromCoord) try { fromCoord = await nominatimGeocode(fromText); } catch (e) { alert(e.message); return; }
+    if (!toCoord) try { toCoord = await nominatimGeocode(toText); } catch (e) { alert(e.message); return; }
+    const profile = (typeRoute && typeRoute.value === 'Пешком') ? 'foot-walking' : 'foot-walking';
+    btn.disabled = true;
+    btn.textContent = 'Строим…';
+    try {
+      const ors = await buildRouteOnMap(fromCoord, toCoord, profile);
+      const features = ors.features || [];
+      const geom = features[0] && features[0].geometry;
+      const coords = geom && geom.coordinates ? geom.coordinates.map(c => [c[1], c[0]]) : [];
+      if (coords.length >= 2) drawRouteSegmentsOnMap(coords);
+      else alert('Маршрут не найден.');
+    } catch (e) {
+      alert(e.message || 'Ошибка построения маршрута.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Проложить';
+    }
+  });
+});
 
