@@ -19,7 +19,7 @@ builder.Services.AddDbContext<ApplicationContext>(options =>
     options.UseNpgsql(connection);
 });
 
-// Создаём таблицы при первом запуске и добавляем настройки по умолчанию
+// Создаём таблицы при первом запуске, настройки по умолчанию и тестовые объекты (если БД пустая)
 using (var scope = builder.Services.BuildServiceProvider().CreateScope())
 {
     var ctx = scope.ServiceProvider.GetRequiredService<ApplicationContext>();
@@ -27,6 +27,18 @@ using (var scope = builder.Services.BuildServiceProvider().CreateScope())
     if (!ctx.AdminSettings.Any())
     {
         ctx.AdminSettings.Add(new MapApi.Models.AdminSetting { CronExpression = "0 */5 * * * ?" });
+        ctx.SaveChanges();
+    }
+    // Тестовые объекты на карте (Саратов), чтобы не было пусто при первом запуске
+    if (!ctx.MapObject.Any())
+    {
+        var testObjects = new[]
+        {
+            new MapApi.Models.MapObject { X = 51.533557, Y = 46.034257, Display_name = "Тестовый объект 1", IRI = "http://example.org/seed#obj1", Adress = "ул. Московская, 1", Description = "Тестовое описание", Images = "Нет изображения", Type = "Социальная инфраструктура", Rating = 0, WorkingHours = "Пн–Пт 9:00–18:00" },
+            new MapApi.Models.MapObject { X = 51.538, Y = 46.028, Display_name = "Тестовый объект 2", IRI = "http://example.org/seed#obj2", Adress = "ул. Волжская, 10", Description = "Тестовое описание", Images = "Нет изображения", Type = "Социальная инфраструктура", Rating = 0, WorkingHours = "Ежедневно 8:00–20:00" },
+            new MapApi.Models.MapObject { X = 51.528, Y = 46.042, Display_name = "Тестовый объект 3", IRI = "http://example.org/seed#obj3", Adress = "пр. Кирова, 5", Description = "Тестовое описание", Images = "Нет изображения", Type = "Транспортная инфраструктура", Rating = 0, WorkingHours = "Круглосуточно" },
+        };
+        ctx.MapObject.AddRange(testObjects);
         ctx.SaveChanges();
     }
 }
