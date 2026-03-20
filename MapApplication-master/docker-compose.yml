@@ -9,6 +9,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Username=postgres;Password=12345;Database=map
+      # Ключ OpenRouteService: получите бесплатно на https://openrouteservice.org/dev/#/signup и задайте здесь или в .env
+      - OpenRouteService__ApiKey=${OPENROUTE_API_KEY:-}
     ports:
       - "5000:80"
     networks:

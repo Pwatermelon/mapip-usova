@@ -54,6 +54,7 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             tar -xzf deploy.tar.gz
             cd MapApplication-master
+            export OPENROUTE_API_KEY='${{ secrets.OPENROUTE_API_KEY }}'
             docker-compose down --remove-orphans || true
             docker-compose build --no-cache
             docker-compose up -d
