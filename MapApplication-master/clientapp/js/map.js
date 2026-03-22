@@ -887,14 +887,53 @@ async function nominatimGeocode(address) {
   return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
 }
 
+/** OpenRouteService GeoJSON: LineString или MultiLineString, иногда несколько features — в [lat,lon]. */
+function orsResponseToLatLngCoords(ors) {
+  const out = [];
+  const pushRing = (ring) => {
+    if (!ring || !ring.length) return;
+    for (const c of ring) {
+      if (!Array.isArray(c) || c.length < 2) continue;
+      out.push([c[1], c[0]]);
+    }
+  };
+  const addGeometry = (g) => {
+    if (!g || !g.coordinates) return;
+    const t = g.type;
+    if (t === 'LineString') pushRing(g.coordinates);
+    else if (t === 'MultiLineString') {
+      for (const line of g.coordinates) pushRing(line);
+    }
+  };
+  const features = ors && ors.features;
+  if (Array.isArray(features)) {
+    for (const f of features) addGeometry(f && f.geometry);
+  }
+  if (out.length < 2 && ors && Array.isArray(ors.routes) && ors.routes[0] && ors.routes[0].geometry) {
+    addGeometry(ors.routes[0].geometry);
+  }
+  return out;
+}
+
 async function buildRouteOnMap(fromCoord, toCoord, profile) {
   const res = await fetch('/api/routebuild/Build', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ From: fromCoord, To: toCoord, Profile: profile || 'foot-walking' })
+    body: JSON.stringify({
+      from: fromCoord,
+      to: toCoord,
+      profile: profile || 'foot-walking'
+    })
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(JSON.parse(text).error || text || 'Ошибка построения маршрута');
+  if (!res.ok) {
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      if (j.error) msg = j.error;
+    } catch (_) {}
+    throw new Error(msg || 'Ошибка построения маршрута');
+  }
   return JSON.parse(text);
 }
 
@@ -934,6 +973,8 @@ function setupRouteAddressAutocomplete(inputId, suggestionsId) {
   const container = document.getElementById(suggestionsId);
   if (!input || !container) return;
   input.addEventListener('input', function () {
+    delete this.dataset.lat;
+    delete this.dataset.lon;
     container.innerHTML = '';
     const results = searchObjectsForRoute(this.value);
     results.slice(0, 8).forEach(obj => {
@@ -983,12 +1024,14 @@ document.addEventListener('DOMContentLoaded', function () {
     btn.disabled = true;
     btn.textContent = 'Строим…';
     try {
+      if (fromCoord[0] === toCoord[0] && fromCoord[1] === toCoord[1]) {
+        alert('Точки «Откуда» и «Куда» совпадают. Выберите разные объекты.');
+        return;
+      }
       const ors = await buildRouteOnMap(fromCoord, toCoord, profile);
-      const features = ors.features || [];
-      const geom = features[0] && features[0].geometry;
-      const coords = geom && geom.coordinates ? geom.coordinates.map(c => [c[1], c[0]]) : [];
+      const coords = orsResponseToLatLngCoords(ors);
       if (coords.length >= 2) drawRouteSegmentsOnMap(coords);
-      else alert('Маршрут не найден.');
+      else alert('Маршрут не найден. Проверьте ключ OpenRouteService или попробуйте другой профиль.');
     } catch (e) {
       alert(e.message || 'Ошибка построения маршрута.');
     } finally {

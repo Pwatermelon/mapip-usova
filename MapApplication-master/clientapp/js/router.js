@@ -97,15 +97,41 @@ async function nominatimGeocode(address) {
   return [lat, lon];
 }
 
+/** Ответ ORS: LineString / MultiLineString / несколько features → [lat, lon]. */
+function orsResponseToLatLngCoords(ors) {
+  const out = [];
+  const pushRing = (ring) => {
+    if (!ring || !ring.length) return;
+    for (const c of ring) {
+      if (!Array.isArray(c) || c.length < 2) continue;
+      out.push([c[1], c[0]]);
+    }
+  };
+  const addGeometry = (g) => {
+    if (!g || !g.coordinates) return;
+    if (g.type === 'LineString') pushRing(g.coordinates);
+    else if (g.type === 'MultiLineString') {
+      for (const line of g.coordinates) pushRing(line);
+    }
+  };
+  if (ors && Array.isArray(ors.features)) {
+    for (const f of ors.features) addGeometry(f && f.geometry);
+  }
+  if (out.length < 2 && ors && Array.isArray(ors.routes) && ors.routes[0] && ors.routes[0].geometry) {
+    addGeometry(ors.routes[0].geometry);
+  }
+  return out;
+}
+
 /** Построить маршрут через бэкенд (OpenRouteService). */
 async function buildRouteFromApi(fromCoord, toCoord, profile) {
   const res = await fetch(getRouteBuildUrl(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      From: fromCoord,
-      To: toCoord,
-      Profile: profile || 'foot-walking'
+      from: fromCoord,
+      to: toCoord,
+      profile: profile || 'foot-walking'
     })
   });
   const text = await res.text();
@@ -123,9 +149,8 @@ function drawBuiltRoute(geojsonOrCoordinates, summary) {
   let coords = [];
   if (Array.isArray(geojsonOrCoordinates)) {
     coords = geojsonOrCoordinates.map(c => [c[1], c[0]]);
-  } else if (geojsonOrCoordinates && geojsonOrCoordinates.features && geojsonOrCoordinates.features[0]) {
-    const geom = geojsonOrCoordinates.features[0].geometry;
-    if (geom && geom.coordinates) coords = geom.coordinates.map(c => [c[1], c[0]]);
+  } else if (geojsonOrCoordinates && typeof geojsonOrCoordinates === 'object') {
+    coords = orsResponseToLatLngCoords(geojsonOrCoordinates);
   }
   if (coords.length < 2) return null;
   const segments = getSegmentsWithData(coords, allMapObjects, OBJECT_NEAR_RADIUS_M);

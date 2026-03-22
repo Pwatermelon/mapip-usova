@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace MapApi.Controllers
@@ -57,8 +58,14 @@ namespace MapApi.Controllers
 
         public class BuildRouteRequest
         {
-            public double[] From { get; set; } = null!; // [lat, lon]
+            /// <summary>Координаты [широта, долгота]. В JSON — camelCase: "from".</summary>
+            [JsonPropertyName("from")]
+            public double[] From { get; set; } = null!;
+
+            [JsonPropertyName("to")]
             public double[] To { get; set; } = null!;
+
+            [JsonPropertyName("profile")]
             public string? Profile { get; set; } // wheelchair | foot-walking
         }
     }
