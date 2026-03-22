@@ -54,28 +54,45 @@
       </div>
       <div class="toolbar-content hidden" id="toolbar-content-2">
         <h3>Проложить маршрут</h3>
-        <br>
-        <p class="route">Укажите, откуда Вы начнете свой маршрут:</p>
+        <div class="route-help" style="font-size:0.88em;color:#333;background:#f5f8ff;border:1px solid #cde;padding:10px 12px;border-radius:8px;margin-bottom:12px;line-height:1.45;">
+          <strong>Что вводить в «Откуда» и «Куда»</strong> (любой способ):
+          <ul style="margin:8px 0 0 18px;padding:0;">
+            <li><strong>Адрес текстом</strong> — как в навигаторе: <em>Саратов, площадь Театральная</em> или <em>ул. Московская 30, Саратов</em></li>
+            <li><strong>Координаты</strong> — через запятую: <em>широта, долгота</em> (как на картах РФ). Пример: <code>51.533, 46.034</code></li>
+            <li><strong>Клик по карте</strong> — кнопки ниже, затем щёлкните по нужному месту на карте</li>
+            <li><strong>Объект из базы</strong> — начните вводить название, выберите из выпадающего списка</li>
+          </ul>
+        </div>
+        <p class="route">Откуда (старт):</p>
         <div class="search-container">
-          <input type="text" id="addressX" class="search-input" placeholder="Откуда">
+          <input type="text" id="addressX" class="search-input" placeholder="Например: Саратов, парк Победы  или  51.533, 46.034">
           <div id="suggestionsX" class="search-suggestions"></div>
         </div>
-        <br>
-        
-        <p class="route">Укажите, куда Вы отправитесь:</p>
+        <button type="button" id="routePickFromBtn" class="toggle-button" style="margin-top:6px;">Указать старт на карте</button>
+        <br><br>
+        <p class="route">Куда (финиш):</p>
         <div class="search-container">
-          <input type="text" id="addressY" class="search-input" placeholder="Куда">
+          <input type="text" id="addressY" class="search-input" placeholder="Например: Саратов, СГУ  или  51.540, 46.016">
           <div id="suggestionsY" class="search-suggestions"></div>
         </div>
-        <br>
-        <p class="route">Каким образом Вы собираетесь добраться:</p>
+        <button type="button" id="routePickToBtn" class="toggle-button" style="margin-top:6px;">Указать финиш на карте</button>
+        <br><br>
+        <p class="route">Способ передвижения:</p>
         <select id="typeRoute" name="type" required>
-            <option value="Пешком">Пешком</option>
-            <option value="Общественным транспортом">Общественным транспортом</option>
-            <option value="На машине">На машине</option>
+            <option value="foot-walking">Пешком</option>
+            <option value="wheelchair">Колясочный маршрут</option>
+            <option value="driving-car">На машине</option>
+            <option value="foot-walking">Общественный транспорт (нет в ORS — строится как пеший)</option>
         </select><br><br>
+        <label class="route" style="display:block;cursor:pointer;font-size:0.9em;">
+          <input type="checkbox" id="routeAlternatives" style="vertical-align:middle;margin-right:6px;">
+          Построить до <strong>трёх</strong> разных вариантов маршрута (разные цвета). Если отключено — один маршрут (чаще срабатывает без ошибок).
+        </label><br>
+        <p class="route" style="font-size:0.85em;">Вдоль линии: <span style="color:#28a745;font-weight:600;">зелёный</span> — рядом есть объекты из базы, <span style="color:#fd7e14;font-weight:600;">оранжевый</span> — нет.</p>
+        <div id="route-legend" class="route-legend-map" style="font-size:0.8em;margin:8px 0;line-height:1.5;"></div>
         <div class="buttons">
           <button id="routeBuildButton">Проложить</button>
+          <button type="button" id="routeClearButton" class="toggle-button">Сбросить маршруты</button>
         </div>
 
       </div>

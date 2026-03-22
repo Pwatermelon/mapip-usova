@@ -33,7 +33,7 @@ namespace MapApi.Controllers
                 return BadRequest(new { error = "Укажите точки From и To как [широта, долгота]." });
 
             var profile = (request.Profile ?? "foot-walking").ToLowerInvariant();
-            if (profile != "wheelchair" && profile != "foot-walking")
+            if (profile != "wheelchair" && profile != "foot-walking" && profile != "driving-car")
                 profile = "foot-walking";
 
             // OpenRouteService: coordinates в формате [lon, lat]
@@ -42,10 +42,43 @@ namespace MapApi.Controllers
                 new[] { request.To[1], request.To[0] }
             };
 
-            var body = new { coordinates };
+            var alt = request.AlternativeCount ?? 1;
+            if (alt < 1) alt = 1;
+            if (alt > 3) alt = 3;
+
+            // ORS ждёт snake_case в JSON; Dictionary сохраняет имена ключей как заданы.
             var client = _httpClientFactory.CreateClient();
-            var url = $"https://api.openrouteservice.org/v2/directions/{profile}/json?api_key={apiKey}";
-            var response = await client.PostAsJsonAsync(url, body);
+            // GeoJSON: координаты линии в явном виде (проще и надёжнее, чем encoded polyline в /json).
+            var url = $"https://api.openrouteservice.org/v2/directions/{profile}/geojson?api_key={apiKey}";
+            HttpResponseMessage response;
+            if (alt > 1)
+            {
+                var body = new Dictionary<string, object?>
+                {
+                    ["coordinates"] = coordinates,
+                    ["options"] = new Dictionary<string, object?>
+                    {
+                        ["alternative_routes"] = new Dictionary<string, object?>
+                        {
+                            ["target_count"] = alt,
+                            ["weight_factor"] = 1.45
+                        }
+                    }
+                };
+                response = await client.PostAsJsonAsync(url, body);
+                if (!response.IsSuccessStatusCode)
+                {
+                    await response.Content.ReadAsStringAsync();
+                    response.Dispose();
+                    body = new Dictionary<string, object?> { ["coordinates"] = coordinates };
+                    response = await client.PostAsJsonAsync(url, body);
+                }
+            }
+            else
+            {
+                response = await client.PostAsJsonAsync(url, new { coordinates });
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync();
@@ -66,7 +99,11 @@ namespace MapApi.Controllers
             public double[] To { get; set; } = null!;
 
             [JsonPropertyName("profile")]
-            public string? Profile { get; set; } // wheelchair | foot-walking
+            public string? Profile { get; set; } // wheelchair | foot-walking | driving-car
+
+            /// <summary>Сколько вариантов маршрута запросить у ORS (1–3). 1 — без alternative_routes.</summary>
+            [JsonPropertyName("alternativeCount")]
+            public int? AlternativeCount { get; set; }
         }
     }
 }

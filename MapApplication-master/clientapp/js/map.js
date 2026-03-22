@@ -854,9 +854,17 @@ async function confirmComment(modifiedText, rate, mapObjectId) {
 
 // ---- Проложить маршрут (в меню карты) ----
 let routeLayersOnMap = [];
-const ROUTE_COLOR_WITH_DATA = '#28a745';
-const ROUTE_COLOR_NO_DATA = '#fd7e14';
 const ROUTE_OBJECT_RADIUS_M = 80;
+/** Пары цветов (участок с объектами в БД / без) для каждого из альтернативных маршрутов */
+const ROUTE_VARIANT_PALETTE = [
+  { withData: '#28a745', withoutData: '#fd7e14' },
+  { withData: '#0d9488', withoutData: '#f59e0b' },
+  { withData: '#7c3aed', withoutData: '#db2777' }
+];
+
+let routePickMode = null; // null | 'from' | 'to'
+let routeFromMarker = null;
+let routeToMarker = null;
 
 function distanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
@@ -880,15 +888,62 @@ function isPointNearObjects(lat, lon, radiusM) {
 
 async function nominatimGeocode(address) {
   const q = encodeURIComponent(String(address).trim());
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, { headers: { 'Accept-Language': 'ru' } });
-  if (!res.ok) throw new Error('Ошибка геокодирования');
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
+    headers: {
+      'Accept-Language': 'ru',
+      // Политика OSM: без User-Agent поиск часто пустой или блокируется
+      'User-Agent': 'MAPIP-AccessibilityMap/1.0 (education; map route geocoding)'
+    }
+  });
+  if (!res.ok) throw new Error('Ошибка геокодирования (код ' + res.status + '). Попробуйте координаты или клик по карте.');
   const data = await res.json();
-  if (!data || data.length === 0) throw new Error('Адрес не найден: ' + address);
+  if (!data || data.length === 0) {
+    throw new Error('Адрес не найден в OpenStreetMap: «' + address + '». Введите точнее (город, улица) или координаты вида 51.533, 46.034');
+  }
   return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
 }
 
-/** OpenRouteService GeoJSON: LineString или MultiLineString, иногда несколько features — в [lat,lon]. */
-function orsResponseToLatLngCoords(ors) {
+/** Декодирование encoded polyline (OpenRouteService / Google), precision 5 или 6. */
+function decodePolyline(encoded, precision) {
+  const p = precision === 6 ? 6 : 5;
+  const factor = Math.pow(10, p);
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const coordinates = [];
+  if (!encoded || typeof encoded !== 'string') return coordinates;
+  while (index < encoded.length) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lat += dlat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lng += dlng;
+    coordinates.push([lat / factor, lng / factor]);
+  }
+  return coordinates;
+}
+
+function geometryToLatLngRoute(geom) {
+  if (!geom) return [];
+  if (typeof geom === 'string') {
+    let pts = decodePolyline(geom, 5);
+    if (pts.length < 2) pts = decodePolyline(geom, 6);
+    return pts;
+  }
   const out = [];
   const pushRing = (ring) => {
     if (!ring || !ring.length) return;
@@ -897,32 +952,86 @@ function orsResponseToLatLngCoords(ors) {
       out.push([c[1], c[0]]);
     }
   };
-  const addGeometry = (g) => {
-    if (!g || !g.coordinates) return;
-    const t = g.type;
-    if (t === 'LineString') pushRing(g.coordinates);
-    else if (t === 'MultiLineString') {
-      for (const line of g.coordinates) pushRing(line);
+  if (geom.type === 'LineString' && geom.coordinates) pushRing(geom.coordinates);
+  else if (geom.type === 'MultiLineString' && geom.coordinates) {
+    for (const line of geom.coordinates) pushRing(line);
+  } else if (geom.type === 'GeometryCollection' && Array.isArray(geom.geometries)) {
+    for (const g of geom.geometries) {
+      const part = geometryToLatLngRoute(g);
+      for (const p of part) out.push(p);
     }
-  };
-  const features = ors && ors.features;
-  if (Array.isArray(features)) {
-    for (const f of features) addGeometry(f && f.geometry);
-  }
-  if (out.length < 2 && ors && Array.isArray(ors.routes) && ors.routes[0] && ors.routes[0].geometry) {
-    addGeometry(ors.routes[0].geometry);
   }
   return out;
 }
 
-async function buildRouteOnMap(fromCoord, toCoord, profile) {
+/** Все варианты маршрута из ответа ORS: массив линий [[lat,lon], ...], ...] */
+function extractAllRoutesFromOrs(ors) {
+  const routes = [];
+  const pushIfOk = (coords) => {
+    if (coords && coords.length >= 2) routes.push(coords);
+  };
+
+  if (ors && Array.isArray(ors.features) && ors.features.length > 0) {
+    for (const f of ors.features) {
+      pushIfOk(geometryToLatLngRoute(f && f.geometry));
+    }
+    if (routes.length) return routes;
+  }
+
+  if (ors && Array.isArray(ors.routes) && ors.routes.length > 0) {
+    for (const r of ors.routes) {
+      pushIfOk(geometryToLatLngRoute(r && r.geometry));
+    }
+  }
+
+  if (!routes.length && ors && ors.type === 'Feature' && ors.geometry) {
+    pushIfOk(geometryToLatLngRoute(ors.geometry));
+  }
+
+  return routes;
+}
+
+/** Одна линия (совместимость): первая альтернатива или склейка. */
+function orsResponseToLatLngCoords(ors) {
+  const all = extractAllRoutesFromOrs(ors);
+  return all.length ? all[0] : [];
+}
+
+/** Парсинг «широта, долгота» для региона РФ (и общий fallback). */
+function parseLatLonFromText(text) {
+  const m = String(text).trim().match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]+\s*(-?\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const a = parseFloat(m[1]);
+  const b = parseFloat(m[2]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const latOk = (x) => x >= 41 && x <= 82;
+  const lonOk = (x) => x >= 10 && x <= 190;
+  if (latOk(a) && lonOk(b)) return [a, b];
+  if (latOk(b) && lonOk(a)) return [b, a];
+  if (Math.abs(a) <= 90 && Math.abs(b) <= 180) return [a, b];
+  return null;
+}
+
+function setRoutePickMode(mode) {
+  routePickMode = mode;
+  const mapEl = map && map.getContainer();
+  if (mapEl) mapEl.style.cursor = mode ? 'crosshair' : '';
+  const bf = document.getElementById('routePickFromBtn');
+  const bt = document.getElementById('routePickToBtn');
+  if (bf) bf.style.outline = mode === 'from' ? '2px solid #3388ff' : '';
+  if (bt) bt.style.outline = mode === 'to' ? '2px solid #3388ff' : '';
+}
+
+async function buildRouteOnMap(fromCoord, toCoord, profile, alternativeCount) {
+  const alt = alternativeCount != null ? alternativeCount : 1;
   const res = await fetch('/api/routebuild/Build', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: fromCoord,
       to: toCoord,
-      profile: profile || 'foot-walking'
+      profile: profile || 'foot-walking',
+      alternativeCount: alt
     })
   });
   const text = await res.text();
@@ -937,24 +1046,77 @@ async function buildRouteOnMap(fromCoord, toCoord, profile) {
   return JSON.parse(text);
 }
 
-function clearRouteOnMap() {
+function clearRoutePolylinesOnly() {
   routeLayersOnMap.forEach(l => { try { map.removeLayer(l); } catch (_) {} });
   routeLayersOnMap = [];
 }
 
-function drawRouteSegmentsOnMap(coords) {
-  clearRouteOnMap();
+/** Полный сброс: линии + маркеры точек на карте */
+function clearRouteOnMap() {
+  clearRoutePolylinesOnly();
+  if (routeFromMarker) { try { map.removeLayer(routeFromMarker); } catch (_) {} routeFromMarker = null; }
+  if (routeToMarker) { try { map.removeLayer(routeToMarker); } catch (_) {} routeToMarker = null; }
+}
+
+/**
+ * Один вариант маршрута: сегменты зелёный/оранжевый (или цвета из palette).
+ * @param {number} variantIndex — индекс в ROUTE_VARIANT_PALETTE
+ */
+function drawOneRouteVariantOnMap(coords, variantIndex) {
+  const pal = ROUTE_VARIANT_PALETTE[variantIndex % ROUTE_VARIANT_PALETTE.length];
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
     const midLat = (a[0] + b[0]) / 2;
     const midLon = (a[1] + b[1]) / 2;
     const hasData = isPointNearObjects(midLat, midLon, ROUTE_OBJECT_RADIUS_M);
-    const color = hasData ? ROUTE_COLOR_WITH_DATA : ROUTE_COLOR_NO_DATA;
-    const line = L.polyline([a, b], { color, weight: 5, opacity: 0.8 }).addTo(map);
+    const color = hasData ? pal.withData : pal.withoutData;
+    const line = L.polyline([a, b], { color, weight: 5 + (variantIndex === 0 ? 1 : 0), opacity: 0.88 - variantIndex * 0.06 }).addTo(map);
     routeLayersOnMap.push(line);
   }
-  if (coords.length >= 2) map.fitBounds(L.latLngBounds(coords).pad(0.15));
+}
+
+function drawAllRouteVariantsOnMap(routesCoords) {
+  clearRoutePolylinesOnly();
+  const bounds = [];
+  routesCoords.forEach((coords, idx) => {
+    drawOneRouteVariantOnMap(coords, idx);
+    coords.forEach(c => bounds.push(c));
+  });
+  if (bounds.length >= 2) map.fitBounds(L.latLngBounds(bounds).pad(0.12));
+  updateRouteLegendMap(routesCoords.length);
+}
+
+function updateRouteLegendMap(n) {
+  const el = document.getElementById('route-legend');
+  if (!el) return;
+  if (!n) {
+    el.innerHTML = '';
+    return;
+  }
+  const labels = ['Вариант 1 (зелёный/оранжевый по базе)', 'Вариант 2 (бирюзовый/янтарь)', 'Вариант 3 (фиолетовый/розовый)'];
+  let html = '<strong>Легенда вариантов:</strong><br>';
+  for (let i = 0; i < n; i++) {
+    const p = ROUTE_VARIANT_PALETTE[i % ROUTE_VARIANT_PALETTE.length];
+    html += `<span style="display:inline-block;width:10px;height:10px;background:${p.withData};margin-right:4px;vertical-align:middle;"></span>`;
+    html += `<span style="display:inline-block;width:10px;height:10px;background:${p.withoutData};margin-right:6px;vertical-align:middle;"></span>`;
+    html += (labels[i] || 'Вариант ' + (i + 1)) + '<br>';
+  }
+  el.innerHTML = html;
+}
+
+/** Разрешить координаты: dataset поля → парс чисел → Nominatim */
+async function resolveRouteEndpoint(text, inputEl) {
+  const t = String(text).trim();
+  if (!t) return null;
+  if (inputEl && inputEl.dataset.lat != null && inputEl.dataset.lon != null) {
+    const la = parseFloat(inputEl.dataset.lat);
+    const lo = parseFloat(inputEl.dataset.lon);
+    if (Number.isFinite(la) && Number.isFinite(lo)) return [la, lo];
+  }
+  const parsed = parseLatLonFromText(t);
+  if (parsed) return parsed;
+  return nominatimGeocode(t);
 }
 
 function searchObjectsForRoute(query) {
@@ -1000,40 +1162,107 @@ document.addEventListener('DOMContentLoaded', function () {
   setupRouteAddressAutocomplete('addressY', 'suggestionsY');
 
   const btn = document.getElementById('routeBuildButton');
+  const clr = document.getElementById('routeClearButton');
   const addressX = document.getElementById('addressX');
   const addressY = document.getElementById('addressY');
   const typeRoute = document.getElementById('typeRoute');
+  const pickFrom = document.getElementById('routePickFromBtn');
+  const pickTo = document.getElementById('routePickToBtn');
+
+  map.on('click', function (e) {
+    if (!routePickMode) return;
+    const lat = e.latlng.lat;
+    const lon = e.latlng.lng;
+    const label = lat.toFixed(5) + ', ' + lon.toFixed(5);
+    if (routePickMode === 'from' && addressX) {
+      addressX.value = label;
+      addressX.dataset.lat = String(lat);
+      addressX.dataset.lon = String(lon);
+      if (routeFromMarker) map.removeLayer(routeFromMarker);
+      routeFromMarker = L.marker([lat, lon]).addTo(map).bindPopup('Старт маршрута');
+    } else if (routePickMode === 'to' && addressY) {
+      addressY.value = label;
+      addressY.dataset.lat = String(lat);
+      addressY.dataset.lon = String(lon);
+      if (routeToMarker) map.removeLayer(routeToMarker);
+      routeToMarker = L.marker([lat, lon]).addTo(map).bindPopup('Финиш маршрута');
+    }
+    setRoutePickMode(null);
+  });
+
+  if (pickFrom) pickFrom.addEventListener('click', function () {
+    setRoutePickMode(routePickMode === 'from' ? null : 'from');
+  });
+  if (pickTo) pickTo.addEventListener('click', function () {
+    setRoutePickMode(routePickMode === 'to' ? null : 'to');
+  });
+  if (clr) clr.addEventListener('click', function () {
+    clearRouteOnMap();
+    updateRouteLegendMap(0);
+    setRoutePickMode(null);
+  });
+
   if (!btn || !addressX || !addressY) return;
 
   btn.addEventListener('click', async function () {
     const fromText = addressX.value.trim();
     const toText = addressY.value.trim();
     if (!fromText || !toText) {
-      alert('Укажите «Откуда» и «Куда».');
+      alert('Укажите «Откуда» и «Куда» (адрес, координаты или точка на карте).');
       return;
     }
-    let fromCoord = null;
-    let toCoord = null;
-    if (addressX.dataset.lat != null && addressX.dataset.lon != null)
-      fromCoord = [parseFloat(addressX.dataset.lat), parseFloat(addressX.dataset.lon)];
-    if (addressY.dataset.lat != null && addressY.dataset.lon != null)
-      toCoord = [parseFloat(addressY.dataset.lat), parseFloat(addressY.dataset.lon)];
-    if (!fromCoord) try { fromCoord = await nominatimGeocode(fromText); } catch (e) { alert(e.message); return; }
-    if (!toCoord) try { toCoord = await nominatimGeocode(toText); } catch (e) { alert(e.message); return; }
-    const profile = (typeRoute && typeRoute.value === 'Пешком') ? 'foot-walking' : 'foot-walking';
+    const profile = (typeRoute && typeRoute.value) ? typeRoute.value : 'foot-walking';
     btn.disabled = true;
     btn.textContent = 'Строим…';
+    setRoutePickMode(null);
     try {
-      if (fromCoord[0] === toCoord[0] && fromCoord[1] === toCoord[1]) {
-        alert('Точки «Откуда» и «Куда» совпадают. Выберите разные объекты.');
+      let fromCoord;
+      let toCoord;
+      try {
+        fromCoord = await resolveRouteEndpoint(fromText, addressX);
+      } catch (e) {
+        alert('Откуда: ' + (e.message || 'не удалось определить точку'));
         return;
       }
-      const ors = await buildRouteOnMap(fromCoord, toCoord, profile);
-      const coords = orsResponseToLatLngCoords(ors);
-      if (coords.length >= 2) drawRouteSegmentsOnMap(coords);
-      else alert('Маршрут не найден. Проверьте ключ OpenRouteService или попробуйте другой профиль.');
+      try {
+        toCoord = await resolveRouteEndpoint(toText, addressY);
+      } catch (e) {
+        alert('Куда: ' + (e.message || 'не удалось определить точку'));
+        return;
+      }
+      if (fromCoord[0] === toCoord[0] && fromCoord[1] === toCoord[1]) {
+        alert('Точки «Откуда» и «Куда» совпадают.');
+        return;
+      }
+      const altCb = document.getElementById('routeAlternatives');
+      const alternativeCount = altCb && altCb.checked ? 3 : 1;
+      const ors = await buildRouteOnMap(fromCoord, toCoord, profile, alternativeCount);
+      const errObj = ors && (ors.error || ors.Error);
+      if (errObj) {
+        const msg = typeof errObj === 'object' && errObj.message != null ? errObj.message : String(errObj);
+        alert('Сервис маршрутов отклонил запрос: ' + msg + '\n\nПроверьте ключ API на сервере и выбранный способ передвижения.');
+        return;
+      }
+      const allRoutes = extractAllRoutesFromOrs(ors);
+      if (allRoutes.length >= 1) drawAllRouteVariantsOnMap(allRoutes);
+      else {
+        console.warn('Ответ маршрута без линии (смотрите объект):', ors);
+        alert(
+          'Маршрут на карте не построился: в ответе нет линии.\n\n' +
+            'Что сделать:\n' +
+            '1) Убедитесь, что на сервере задан ключ OpenRouteService (appsettings / OPENROUTE_API_KEY).\n' +
+            '2) Снимите галочку «до трёх вариантов» и нажмите снова.\n' +
+            '3) Для «На машине» точки должны быть у дорог; для пешего — не в поле/воде.\n' +
+            '4) Попробуйте координаты: Откуда 51.533, 46.034 — Куда 51.540, 46.016 (пример для Саратова).'
+        );
+      }
     } catch (e) {
-      alert(e.message || 'Ошибка построения маршрута.');
+      const msg = e.message || 'Ошибка построения маршрута.';
+      if (/alternative|option/i.test(msg)) {
+        alert(msg + '\n\nПопробуйте профиль «Пешком» или «На машине», либо сообщите администратору.');
+      } else {
+        alert(msg);
+      }
     } finally {
       btn.disabled = false;
       btn.textContent = 'Проложить';

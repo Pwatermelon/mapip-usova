@@ -6,6 +6,11 @@
 const COLOR_WITH_DATA = '#28a745';
 const COLOR_NO_DATA = '#fd7e14';
 const OBJECT_NEAR_RADIUS_M = 80; // метры: считаем, что объект "на маршруте"
+const ROUTE_VARIANT_PALETTE = [
+  { withData: '#28a745', withoutData: '#fd7e14' },
+  { withData: '#0d9488', withoutData: '#f59e0b' },
+  { withData: '#7c3aed', withoutData: '#db2777' }
+];
 
 let map;
 let routeLayers = [];
@@ -97,8 +102,46 @@ async function nominatimGeocode(address) {
   return [lat, lon];
 }
 
-/** Ответ ORS: LineString / MultiLineString / несколько features → [lat, lon]. */
-function orsResponseToLatLngCoords(ors) {
+function decodePolyline(encoded, precision) {
+  const p = precision === 6 ? 6 : 5;
+  const factor = Math.pow(10, p);
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const coordinates = [];
+  if (!encoded || typeof encoded !== 'string') return coordinates;
+  while (index < encoded.length) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lat += dlat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lng += dlng;
+    coordinates.push([lat / factor, lng / factor]);
+  }
+  return coordinates;
+}
+
+function geometryToLatLngRoute(geom) {
+  if (!geom) return [];
+  if (typeof geom === 'string') {
+    let pts = decodePolyline(geom, 5);
+    if (pts.length < 2) pts = decodePolyline(geom, 6);
+    return pts;
+  }
   const out = [];
   const pushRing = (ring) => {
     if (!ring || !ring.length) return;
@@ -107,20 +150,34 @@ function orsResponseToLatLngCoords(ors) {
       out.push([c[1], c[0]]);
     }
   };
-  const addGeometry = (g) => {
-    if (!g || !g.coordinates) return;
-    if (g.type === 'LineString') pushRing(g.coordinates);
-    else if (g.type === 'MultiLineString') {
-      for (const line of g.coordinates) pushRing(line);
+  if (geom.type === 'LineString' && geom.coordinates) pushRing(geom.coordinates);
+  else if (geom.type === 'MultiLineString' && geom.coordinates) {
+    for (const line of geom.coordinates) pushRing(line);
+  } else if (geom.type === 'GeometryCollection' && Array.isArray(geom.geometries)) {
+    for (const g of geom.geometries) {
+      const part = geometryToLatLngRoute(g);
+      for (const p of part) out.push(p);
     }
-  };
-  if (ors && Array.isArray(ors.features)) {
-    for (const f of ors.features) addGeometry(f && f.geometry);
-  }
-  if (out.length < 2 && ors && Array.isArray(ors.routes) && ors.routes[0] && ors.routes[0].geometry) {
-    addGeometry(ors.routes[0].geometry);
   }
   return out;
+}
+
+function extractAllRoutesFromOrs(ors) {
+  const routes = [];
+  const pushIfOk = (coords) => {
+    if (coords && coords.length >= 2) routes.push(coords);
+  };
+  if (ors && Array.isArray(ors.features) && ors.features.length > 0) {
+    for (const f of ors.features) pushIfOk(geometryToLatLngRoute(f && f.geometry));
+    if (routes.length) return routes;
+  }
+  if (ors && Array.isArray(ors.routes) && ors.routes.length > 0) {
+    for (const r of ors.routes) pushIfOk(geometryToLatLngRoute(r && r.geometry));
+  }
+  if (!routes.length && ors && ors.type === 'Feature' && ors.geometry) {
+    pushIfOk(geometryToLatLngRoute(ors.geometry));
+  }
+  return routes;
 }
 
 /** Построить маршрут через бэкенд (OpenRouteService). */
@@ -131,7 +188,8 @@ async function buildRouteFromApi(fromCoord, toCoord, profile) {
     body: JSON.stringify({
       from: fromCoord,
       to: toCoord,
-      profile: profile || 'foot-walking'
+      profile: profile || 'foot-walking',
+      alternativeCount: 1
     })
   });
   const text = await res.text();
@@ -143,26 +201,33 @@ async function buildRouteFromApi(fromCoord, toCoord, profile) {
   return JSON.parse(text);
 }
 
-/** Отрисовать построенный маршрут по сегментам (объекты на маршруте — зелёный, иначе оранжевый). */
-function drawBuiltRoute(geojsonOrCoordinates, summary) {
+/** Несколько вариантов маршрута — разные базовые пары цветов; сегменты по наличию объектов в БД. */
+function drawBuiltRoutesFromOrs(ors, summary) {
   clearBuiltRoute();
-  let coords = [];
-  if (Array.isArray(geojsonOrCoordinates)) {
-    coords = geojsonOrCoordinates.map(c => [c[1], c[0]]);
-  } else if (geojsonOrCoordinates && typeof geojsonOrCoordinates === 'object') {
-    coords = orsResponseToLatLngCoords(geojsonOrCoordinates);
-  }
-  if (coords.length < 2) return null;
-  const segments = getSegmentsWithData(coords, allMapObjects, OBJECT_NEAR_RADIUS_M);
-  builtRouteSegments = drawRouteSegments(segments, null);
+  const routes = extractAllRoutesFromOrs(ors);
+  if (!routes.length) return null;
+  const bounds = [];
+  routes.forEach((coords, idx) => {
+    const pal = ROUTE_VARIANT_PALETTE[idx % ROUTE_VARIANT_PALETTE.length];
+    for (let i = 0; i < coords.length - 1; i++) {
+      const a = coords[i];
+      const b = coords[i + 1];
+      const midLat = (a[0] + b[0]) / 2;
+      const midLon = (a[1] + b[1]) / 2;
+      const hasData = isPointNearObjects(midLat, midLon, allMapObjects, OBJECT_NEAR_RADIUS_M);
+      const color = hasData ? pal.withData : pal.withoutData;
+      const line = L.polyline([a, b], { color, weight: 5, opacity: 0.88 - idx * 0.06 }).addTo(map);
+      builtRouteSegments.push(line);
+    }
+    coords.forEach(c => bounds.push(c));
+  });
+  const first = routes[0];
   builtMarkers.push(
-    L.marker(coords[0]).bindPopup('Начало').addTo(map),
-    L.marker(coords[coords.length - 1]).bindPopup('Конец').addTo(map)
+    L.marker(first[0]).bindPopup('Начало').addTo(map),
+    L.marker(first[first.length - 1]).bindPopup('Конец').addTo(map)
   );
-  const allPoints = coords;
-  const bounds = L.latLngBounds(allPoints);
-  map.fitBounds(bounds.pad(0.15));
-  return { coords, summary };
+  map.fitBounds(L.latLngBounds(bounds).pad(0.15));
+  return { routes, summary };
 }
 
 function clearBuiltRoute() {
@@ -194,13 +259,14 @@ async function onBuildRouteClick() {
     ]);
     const ors = await buildRouteFromApi(fromCoord, toCoord, profile);
     const features = ors.features || [];
-    const summary = (features[0] && features[0].properties && features[0].properties.summary) || {};
-    const coords = features[0] && features[0].geometry && features[0].geometry.coordinates;
-    if (!coords || coords.length < 2) {
+    const summary = (features[0] && features[0].properties && features[0].properties.summary) ||
+      (ors.routes && ors.routes[0] && ors.routes[0].summary) || {};
+    const routes = extractAllRoutesFromOrs(ors);
+    if (!routes.length) {
       resultDiv.innerHTML = '<p style="color:#c00;">Маршрут не найден.</p>';
       return;
     }
-    drawBuiltRoute(coords, summary);
+    drawBuiltRoutesFromOrs(ors, summary);
     const dist = (summary.distance / 1000).toFixed(2);
     const dur = summary.duration != null ? Math.round(summary.duration / 60) : '';
     resultDiv.innerHTML = '<p style="color:#28a745;"><strong>Маршрут построен.</strong> Расстояние: ' + dist + ' км.' + (dur ? ' Время: ~' + dur + ' мин.' : '') + '</p>';
