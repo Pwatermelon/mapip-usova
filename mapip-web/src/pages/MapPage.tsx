@@ -1,5 +1,6 @@
 import maplibregl, { Map as MLMap } from "maplibre-gl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useAuth } from "../AuthContext";
 import { coreBase, fetchJson } from "../api";
 
 type MapObject = {
@@ -33,6 +34,7 @@ function objectsToGeoJson(objects: MapObject[]): GeoJSON.FeatureCollection {
 }
 
 export function MapPage() {
+  const { user } = useAuth();
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const objectsRef = useRef<MapObject[]>([]);
@@ -43,25 +45,9 @@ export function MapPage() {
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentText, setCommentText] = useState("");
   const [commentRate, setCommentRate] = useState(5);
-  const [userId, setUserId] = useState<number | null>(null);
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPass, setAuthPass] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
   objectsRef.current = objects;
-
-  const refreshUser = useCallback(async () => {
-    try {
-      const u = await fetchJson<{ id: number }>(`${coreBase}/api/users/current-user`);
-      setUserId(u.id);
-    } catch {
-      setUserId(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshUser();
-  }, [refreshUser]);
 
   useEffect(() => {
     if (!mapEl.current) return;
@@ -170,31 +156,9 @@ export function MapPage() {
     setSelected(o);
   };
 
-  const login = async () => {
-    setErr(null);
-    try {
-      const res = await fetch(`${coreBase}/api/users/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email: authEmail, password: authPass }),
-      });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { detail?: { message?: string } | string };
-        const d = j.detail;
-        setErr(typeof d === "object" && d && "message" in d ? d.message : "Ошибка входа");
-        return;
-      }
-      await refreshUser();
-      setAuthPass("");
-    } catch (e) {
-      setErr(String(e));
-    }
-  };
-
   const sendComment = async () => {
-    if (!selected || userId == null) {
-      setErr("Войдите, чтобы оставить комментарий.");
+    if (!selected || !user) {
+      setErr("Войдите через кнопку в шапке, чтобы оставить комментарий.");
       return;
     }
     setErr(null);
@@ -206,7 +170,7 @@ export function MapPage() {
         body: JSON.stringify({
           newText: commentText,
           newRate: commentRate,
-          user: userId,
+          user: user.id,
           mapObject: selected.id,
         }),
       });
@@ -227,27 +191,10 @@ export function MapPage() {
     <div className="map-layout">
       <aside className="side-panel">
         <h2>Объекты и поиск</h2>
-        {userId != null ? (
-          <p className="pill">В сессии: пользователь {userId}</p>
-        ) : (
-          <div className="field">
-            <label>Вход</label>
-            <input placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
-            <input
-              style={{ marginTop: 6 }}
-              type="password"
-              placeholder="Пароль"
-              value={authPass}
-              onChange={(e) => setAuthPass(e.target.value)}
-            />
-            <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => void login()}>
-              Войти
-            </button>
-          </div>
-        )}
-        <div className="field" style={{ marginTop: 12 }}>
+        {!user && <p className="hint-banner muted">Вход — в правом верхнем углу.</p>}
+        <div className="field">
           <label>Поиск</label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="field-row">
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Название или адрес" />
             <button type="button" className="btn btn-ghost" onClick={() => void runSearch()}>
               Найти
@@ -271,17 +218,17 @@ export function MapPage() {
           ))}
         </div>
         {selected && (
-          <div style={{ marginTop: 16 }}>
+          <div className="detail-block">
             <h2>Выбрано</h2>
             <p>
               <strong>{selected.display_name}</strong>
             </p>
             <p className="muted">{selected.type}</p>
             <p className="muted">{selected.adress}</p>
-            <h3 style={{ fontSize: "0.95rem", marginTop: 12 }}>Комментарии</h3>
+            <h3 className="detail-subtitle">Комментарии</h3>
             {comments.length === 0 && <p className="muted">Пока нет.</p>}
             {comments.map((c) => (
-              <div key={c.id} style={{ marginBottom: 8, fontSize: "0.88rem" }}>
+              <div key={c.id} className="comment-line">
                 <strong>{c.user?.name ?? "—"}</strong>: {c.text}{" "}
                 <span className="muted">({c.rate})</span>
               </div>
