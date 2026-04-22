@@ -6,7 +6,7 @@ MAPIP — микросервисы
   docker compose up --build
 
 Веб: http://localhost:8088
-PostgreSQL: localhost:5432 (postgres / 12345, БД map)
+PostgreSQL: только внутри сети compose (хост: db, порт 5432). С хоста: docker compose exec db psql -U postgres -d map
 
 Сервисы:
   mapip-web     — React + MapLibre, nginx проксирует /api и /routing

@@ -11,8 +11,8 @@ services:
       POSTGRES_DB: map
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # Порт 5432 не пробрасываем на хост — иначе конфликт с системным PostgreSQL / другим контейнером.
+    # Доступ с хоста: docker compose exec db psql -U postgres -d map
     networks:
       - mapip
 
