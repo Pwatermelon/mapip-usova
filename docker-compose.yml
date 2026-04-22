@@ -1,0 +1,70 @@
+# MAPIP — микросервисы: core (Python/FastAPI + PostgreSQL), routing (ORS + Nominatim),
+# mapip-web (React + MapLibre + nginx как единая точка входа), Flask (модерация/рекомендации).
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "12345"
+      POSTGRES_DB: map
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - mapip
+
+  flask:
+    build: ./MapApplication-master/FlaskApi
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://postgres:12345@db:5432/map
+    expose:
+      - "5001"
+    networks:
+      - mapip
+
+  mapip-core:
+    build: ./mapip-core
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://postgres:12345@db:5432/map
+      SESSION_SECRET: ${SESSION_SECRET:-mapip-dev-change-me}
+    expose:
+      - "8000"
+    networks:
+      - mapip
+
+  mapip-routing:
+    build: ./mapip-routing-service
+    environment:
+      OPENROUTE_API_KEY: ${OPENROUTE_API_KEY:-}
+    expose:
+      - "8080"
+    networks:
+      - mapip
+
+  mapip-web:
+    build:
+      context: ./mapip-web
+      args:
+        VITE_CORE_API: ""
+        VITE_ROUTING_API: /routing
+    depends_on:
+      - mapip-core
+      - mapip-routing
+      - flask
+    ports:
+      - "8088:80"
+    networks:
+      - mapip
+
+networks:
+  mapip:
+
+volumes:
+  postgres-data:

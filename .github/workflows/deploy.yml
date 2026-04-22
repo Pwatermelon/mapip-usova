@@ -1,9 +1,9 @@
-# Деплой: копируем код на сервер, сборка и запуск через docker-compose на хосте
+# Деплой: архив с корня репозитория MAPIP → на сервере чистая распаковка (без git clone на сервере).
 name: Deploy (build on host)
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -12,27 +12,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare Docker context (clientapp inside MapApi)
-        run: cp -r MapApplication-master/clientapp MapApplication-master/MapApi/
-
-      - name: Pack project (exclude junk)
+      - name: Pack stack (microservices + Flask)
         run: |
-          tar --exclude='MapApplication-master/clientapp/node_modules' \
-              --exclude='MapApplication-master/MapApi/clientapp/node_modules' \
-              --exclude='MapApplication-master/MapApi/bin' \
-              --exclude='MapApplication-master/MapApi/obj' \
+          tar --exclude='mapip-core/.venv' \
               --exclude='MapApplication-master/FlaskApi/venv' \
+              --exclude='mapip-web/node_modules' \
               --exclude='.git' \
-              -czf deploy.tar.gz MapApplication-master
+              -czf deploy.tar.gz \
+              docker-compose.yml \
+              mapip-core \
+              mapip-routing-service \
+              mapip-web \
+              MapApplication-master/FlaskApi \
+              data
 
-      - name: Create directory on server
+      - name: Ensure deploy directory on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: mkdir -p ${{ secrets.DEPLOY_PATH }}
-        continue-on-error: true
 
       - name: Copy archive to server
         uses: appleboy/scp-action@v0.1.7
@@ -42,20 +42,37 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           source: "deploy.tar.gz"
           target: ${{ secrets.DEPLOY_PATH }}
-        continue-on-error: true
 
-      - name: Build and run on server (docker-compose build + up)
+      - name: Clean old deploy, extract, build, run
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd ${{ secrets.DEPLOY_PATH }}
+            set -euo pipefail
+            DEPLOY="${{ secrets.DEPLOY_PATH }}"
+            cd "$DEPLOY"
+
+            # 1) Остановить прежний стек, пока на месте старый compose (тома БД не трогаем — без -v)
+            if [ -f docker-compose.yml ]; then
+              docker compose down --remove-orphans || true
+            fi
+
+            # 2) Снести артефакты прошлого деплоя (остатки старых путей, полустёртые каталоги)
+            rm -rf mapip-core mapip-routing-service mapip-web MapApplication-master data
+            rm -f docker-compose.yml
+
+            # 3) Свежий архив уже залит scp — распаковываем с нуля
             tar -xzf deploy.tar.gz
-            cd MapApplication-master
+
             export OPENROUTE_API_KEY='${{ secrets.OPENROUTE_API_KEY }}'
-            docker-compose down --remove-orphans || true
-            docker-compose build --no-cache
-            docker-compose up -d
-        continue-on-error: true
+
+            docker compose build --no-cache
+            docker compose up -d
+
+            # 4) Подчистить висячие образы после сборки (не трогает используемые контейнеры)
+            docker image prune -f
+
+            # архив на сервере можно убрать, следующий деплой снова зальёт
+            rm -f deploy.tar.gz
