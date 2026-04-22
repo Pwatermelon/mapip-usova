@@ -44,35 +44,50 @@ jobs:
           target: ${{ secrets.DEPLOY_PATH }}
 
       - name: Clean old deploy, extract, build, run
+        env:
+          OPENROUTE_API_KEY: ${{ secrets.OPENROUTE_API_KEY }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: OPENROUTE_API_KEY
           script: |
             set -euo pipefail
             DEPLOY="${{ secrets.DEPLOY_PATH }}"
             cd "$DEPLOY"
 
-            # 1) Остановить прежний стек, пока на месте старый compose (тома БД не трогаем — без -v)
-            if [ -f docker-compose.yml ]; then
-              docker compose down --remove-orphans || true
+            # docker compose (v2, плагин) или docker-compose (v1) — на многих VPS только второе
+            if docker compose version >/dev/null 2>&1; then
+              compose() { docker compose "$@"; }
+            elif command -v docker-compose >/dev/null 2>&1; then
+              compose() { docker-compose "$@"; }
+            else
+              echo "Нужен Docker Compose: установите плагин (docker compose) или пакет docker-compose" >&2
+              exit 1
             fi
 
-            # 2) Снести артефакты прошлого деплоя (остатки старых путей, полустёртые каталоги)
+            # 1) Остановить прежний стек (тома БД без -v)
+            if [ -f docker-compose.yml ]; then
+              compose down --remove-orphans || true
+            fi
+
+            # 2) Снести артефакты прошлого деплоя
             rm -rf mapip-core mapip-routing-service mapip-web MapApplication-master data
             rm -f docker-compose.yml
 
-            # 3) Свежий архив уже залит scp — распаковываем с нуля
+            # 3) Распаковка
             tar -xzf deploy.tar.gz
+            export OPENROUTE_API_KEY
 
-            export OPENROUTE_API_KEY='${{ secrets.OPENROUTE_API_KEY }}'
+            # 4) Сборка: --no-cache есть только у нормального compose build; иначе --pull
+            if compose build --help 2>&1 | grep -q -- '--no-cache'; then
+              compose build --no-cache
+            else
+              compose build --pull || compose build
+            fi
 
-            docker compose build --no-cache
-            docker compose up -d
+            compose up -d
 
-            # 4) Подчистить висячие образы после сборки (не трогает используемые контейнеры)
             docker image prune -f
-
-            # архив на сервере можно убрать, следующий деплой снова зальёт
             rm -f deploy.tar.gz
