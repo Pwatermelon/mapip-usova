@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 
 const core = process.env.VITE_DEV_CORE_PROXY || "http://127.0.0.1:8000";
 const routing = process.env.VITE_DEV_ROUTING_PROXY || "http://127.0.0.1:8080";
+const flask = process.env.VITE_DEV_FLASK_PROXY || "http://127.0.0.1:5001";
 
 export default defineConfig({
   plugins: [react()],
@@ -20,6 +21,8 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/routing/, "") || "/",
       },
+      "/comments": { target: flask, changeOrigin: true },
+      "/recommendations": { target: flask, changeOrigin: true },
     },
   },
 });

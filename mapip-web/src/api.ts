@@ -27,7 +27,7 @@ function formatApiError(res: Response, text: string): string {
     }
   }
   if (trim.startsWith("<")) {
-    return `Ошибка ${res.status}: вместо JSON пришла HTML-страница (часто nginx 502 или открыт не тот URL). Откройте приложение с корня сайта (например :8088/), не по старой ссылке на .html или порт API.`;
+    return `Ошибка ${res.status}: ответ не JSON (часто страница ошибки прокси). Проверьте URL шлюза с картой (например порт 8088), а не прямой порт API.`;
   }
   return trim.slice(0, 500) || `${res.status} ${res.statusText}`;
 }

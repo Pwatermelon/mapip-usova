@@ -26,6 +26,24 @@ app.include_router(users.router)
 app.include_router(routes_db.router)
 
 
+@app.get("/")
+def root() -> dict[str, str | list[str]]:
+    """Прямой заход на :8000 — не UI; браузерный интерфейс только через mapip-web (nginx)."""
+    return {
+        "service": "mapip-core",
+        "message": "Это backend JSON API. Веб-приложение (React) открывайте через контейнер mapip-web: http://localhost:8088/ или http://localhost:5000/ при пробросе портов из docker-compose.",
+        "api_prefixes": [
+            "GET /GetSocialMapObject",
+            "GET /api/SocialMapObject/SearchBy/",
+            "GET /api/SocialMapObject/GetSocialMapObjectById/{id}",
+            "GET/POST /api/comment/...",
+            "GET/POST /api/users/...",
+            "GET /api/routes/GetRoutesWithDataStatus",
+        ],
+        "openapi": "/docs",
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "mapip-core"}

@@ -58,8 +58,11 @@ services:
       - mapip-core
       - mapip-routing
       - flask
+    # Один шлюз: React + /api (core) + /routing + /comments + /recommendations (flask).
+    # 5000 — частый «старый» порт из launchSettings; не путать с прямым mapip-core:8000 (там только API).
     ports:
       - "8088:80"
+      - "5000:80"
     networks:
       - mapip
 
