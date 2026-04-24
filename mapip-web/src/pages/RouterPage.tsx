@@ -1,6 +1,6 @@
 import maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { coreBase, fetchJson, routingBase } from "../api";
+import { coreBase, errorTextFromResponse, fetchJson, routingBase } from "../api";
 
 type MapObject = { id: number; x: number; y: number; display_name: string };
 
@@ -136,10 +136,16 @@ export function RouterPage() {
       });
       const text = await res.text();
       if (!res.ok) {
-        setErr(text.slice(0, 400));
+        setErr(errorTextFromResponse(res, text));
         return;
       }
-      const data = JSON.parse(text) as OrsGeoJson;
+      let data: OrsGeoJson;
+      try {
+        data = JSON.parse(text) as OrsGeoJson;
+      } catch {
+        setErr("Сервис маршрутов вернул не JSON (проверьте прокси /routing и ключ OPENROUTE_API_KEY).");
+        return;
+      }
       const coords = lineCoordsFromOrs(data);
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",

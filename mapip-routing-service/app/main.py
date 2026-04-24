@@ -5,9 +5,8 @@ MAPIP Routing microservice — внешнее API в духе картограф
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 
 from app.config import settings
 
@@ -24,17 +23,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-class DirectionsRequest(BaseModel):
-    """Точки в формате [широта, долгота] — как в прежнем RouteBuildController."""
-
-    from_: list[float] = Field(..., alias="from")
-    to: list[float]
-    profile: str | None = "foot-walking"
-    alternative_count: int | None = Field(1, alias="alternativeCount")
-
-    model_config = {"populate_by_name": True}
 
 
 @app.get("/health")
@@ -69,25 +57,48 @@ async def geocode_search(
     return out
 
 
+def _parse_lat_lon_pair(value: Any, field: str) -> list[float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise HTTPException(status_code=400, detail=f"{field}: ожидается [lat, lon]")
+    try:
+        return [float(value[0]), float(value[1])]
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"{field}: неверные координаты") from e
+
+
 @app.post("/v1/directions/geojson")
-async def directions_geojson(body: DirectionsRequest) -> Any:
+async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     """
     Построить маршрут; ответ — GeoJSON от OpenRouteService (как раньше /api/routebuild/Build).
+    Тело — JSON с ключами from / to ([широта, долгота]), опционально profile, alternativeCount.
+    Разбор через dict, чтобы ключ «from» не ломался на уровне Pydantic/OpenAPI.
     """
     if not settings.openroute_api_key:
         raise HTTPException(
             status_code=503,
             detail="Не задан OPENROUTE_API_KEY для обращения к OpenRouteService.",
         )
-    if len(body.from_) != 2 or len(body.to) != 2:
-        raise HTTPException(status_code=400, detail="from и to должны быть [lat, lon]")
+    raw_from = body.get("from")
+    if raw_from is None:
+        raw_from = body.get("from_")
+    raw_to = body.get("to")
+    from_ = _parse_lat_lon_pair(raw_from, "from")
+    to = _parse_lat_lon_pair(raw_to, "to")
 
-    profile = (body.profile or "foot-walking").lower()
+    profile = (body.get("profile") or "foot-walking")
+    if isinstance(profile, str):
+        profile = profile.lower()
+    else:
+        profile = "foot-walking"
     if profile not in ("wheelchair", "foot-walking", "driving-car"):
         profile = "foot-walking"
 
-    coordinates = [[body.from_[1], body.from_[0]], [body.to[1], body.to[0]]]
-    alt = body.alternative_count or 1
+    coordinates = [[from_[1], from_[0]], [to[1], to[0]]]
+    alt_raw = body.get("alternativeCount", body.get("alternative_count", 1))
+    try:
+        alt = int(alt_raw) if alt_raw is not None else 1
+    except (TypeError, ValueError):
+        alt = 1
     alt = max(1, min(3, alt))
 
     url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
