@@ -2,7 +2,9 @@ flask
 sqlalchemy
 psycopg2-binary
 pandas
-spacy
+# Модель как прямой wheel — быстрее и стабильнее, чем `python -m spacy download` при docker build / CI
+spacy>=3.8.0,<3.9.0
+https://github.com/explosion/spacy-models/releases/download/ru_core_news_sm-3.8.0/ru_core_news_sm-3.8.0-py3-none-any.whl
 scikit-learn==1.5.2
 surprise
 pymorphy2

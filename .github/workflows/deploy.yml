@@ -52,6 +52,8 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           envs: OPENROUTE_API_KEY
+          # docker compose build --no-cache на VPS часто > 30 мин (Flask: spacy/scikit-surprise и т.д.)
+          command_timeout: 90m
           script: |
             set -euo pipefail
             DEPLOY="${{ secrets.DEPLOY_PATH }}"
