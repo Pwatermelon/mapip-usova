@@ -1,8 +1,11 @@
-/** База core API (данные карты). В Docker через nginx — ''. */
-export const coreBase = import.meta.env.VITE_CORE_API ?? "";
+const baseUrl = import.meta.env.BASE_URL || "/";
+const appBase = baseUrl === "/" ? "" : baseUrl.replace(/\/$/, "");
 
-/** Сервис маршрутизации (как внешний SDK). В dev Vite проксирует /routing → сервис. */
-export const routingBase = import.meta.env.VITE_ROUTING_API ?? "/routing";
+/** База core API (данные карты). Для встраивания под /mapip по умолчанию будет /mapip. */
+export const coreBase = import.meta.env.VITE_CORE_API ?? appBase;
+
+/** Сервис маршрутизации. Для встраивания под /mapip по умолчанию будет /mapip/routing. */
+export const routingBase = import.meta.env.VITE_ROUTING_API ?? `${appBase}/routing`;
 
 function formatApiError(res: Response, text: string): string {
   const trim = text.trim();

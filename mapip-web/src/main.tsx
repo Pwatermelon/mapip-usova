@@ -5,9 +5,12 @@ import { AuthProvider } from "./AuthContext";
 import App from "./App";
 import "./styles.css";
 
+const baseUrl = import.meta.env.BASE_URL || "/";
+const routerBase = baseUrl === "/" ? "/" : baseUrl.replace(/\/$/, "");
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={routerBase}>
       <AuthProvider>
         <App />
       </AuthProvider>
