@@ -198,20 +198,38 @@ export function RouteMapWidget() {
   };
 
   const loadSuggestions = async (q: string, target: "from" | "to") => {
-    if (q.trim().length < 2) {
+    const term = q.trim();
+    if (term.length < 2) {
       if (target === "from") setFromSuggestions([]);
       else setToSuggestions([]);
       return;
     }
+    const local = objects
+      .filter((o) => o.display_name.toLowerCase().includes(term.toLowerCase()))
+      .slice(0, 5)
+      .map((o) => ({ lat: o.x, lon: o.y, display_name: o.display_name }));
     try {
       const hits = await fetchJson<{ lat: number; lon: number; display_name: string }[]>(
-        `${routingBase}/v1/geocode/search?q=${encodeURIComponent(q.trim())}&limit=5`,
+        `${routingBase}/v1/geocode/search?q=${encodeURIComponent(term)}&limit=5`,
       );
-      if (target === "from") setFromSuggestions(hits);
-      else setToSuggestions(hits);
+      const merged = [...local, ...hits].filter(
+        (item, idx, arr) => arr.findIndex((x) => x.display_name === item.display_name) === idx,
+      );
+      if (target === "from") {
+        setFromSuggestions(merged);
+        setToSuggestions([]);
+      } else {
+        setToSuggestions(merged);
+        setFromSuggestions([]);
+      }
     } catch {
-      if (target === "from") setFromSuggestions([]);
-      else setToSuggestions([]);
+      if (target === "from") {
+        setFromSuggestions(local);
+        setToSuggestions([]);
+      } else {
+        setToSuggestions(local);
+        setFromSuggestions([]);
+      }
     }
   };
 
