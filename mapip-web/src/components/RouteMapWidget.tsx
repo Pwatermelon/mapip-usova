@@ -467,35 +467,18 @@ export function RouteMapWidget() {
         return;
       }
       const toCoord = await resolvePoint(toQ, toPoint);
-      const fallbackProfiles = [profile, "foot-walking", "driving-car"].filter(
-        (p, idx, arr) => arr.indexOf(p) === idx,
-      );
-      const altCandidates = alternativeCount > 1 ? [alternativeCount, 1] : [1];
-      let requestProfile = fallbackProfiles[0];
-      let res: Response | null = null;
-      let text = "";
-      for (const alt of altCandidates) {
-        for (const candidate of fallbackProfiles) {
-          requestProfile = candidate;
-          res = await fetch(`${routingBase}/v1/directions/geojson`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              from: fromCoord,
-              to: toCoord,
-              profile: candidate,
-              alternativeCount: alt,
-            }),
-          });
-          text = await res.text();
-          if (res.ok && !hasOrs2007(text)) break;
-        }
-        if (res?.ok && !hasOrs2007(text)) break;
-      }
-      if (!res) {
-        setErr("Не удалось получить ответ сервиса маршрутов.");
-        return;
-      }
+      const requestProfile = profile;
+      const res = await fetch(`${routingBase}/v1/directions/geojson`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: fromCoord,
+          to: toCoord,
+          profile,
+          alternativeCount,
+        }),
+      });
+      const text = await res.text();
       if (!res.ok || hasOrs2007(text)) {
         setErr(errorTextFromResponse(res, text));
         return;

@@ -12,11 +12,11 @@ import { MapPage } from "./pages/MapPage";
 import { StatsPage } from "./pages/StatsPage";
 
 type HeaderAuthProps = {
-  highContrast: boolean;
-  onToggleContrast: () => void;
+  impairedMode: boolean;
+  onToggleImpaired: () => void;
 };
 
-function HeaderAuth({ highContrast, onToggleContrast }: HeaderAuthProps) {
+function HeaderAuth({ impairedMode, onToggleImpaired }: HeaderAuthProps) {
   const { user, loading, logout } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
 
@@ -39,8 +39,8 @@ function HeaderAuth({ highContrast, onToggleContrast }: HeaderAuthProps) {
             Войти
           </button>
         )}
-        <button type="button" className="btn btn-sm btn-blue-legacy" onClick={onToggleContrast}>
-          {highContrast ? "Обычная версия" : "Версия для слабовидящих"}
+        <button type="button" className="btn btn-sm btn-blue-legacy" onClick={onToggleImpaired}>
+          {impairedMode ? "Обычная версия" : "Версия для слабовидящих"}
         </button>
       </div>
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
@@ -49,16 +49,30 @@ function HeaderAuth({ highContrast, onToggleContrast }: HeaderAuthProps) {
 }
 
 export default function App() {
-  const [highContrast, setHighContrast] = useState<boolean>(() => {
-    return localStorage.getItem("mapip-contrast") === "1";
-  });
+  const [impairedMode, setImpairedMode] = useState<boolean>(() => localStorage.getItem("mapip-contrast") === "1");
+  const [fontScale, setFontScale] = useState<number>(() => Number(localStorage.getItem("mapip-bvi-font") ?? "1.1"));
+  const [lineHeight, setLineHeight] = useState<number>(() => Number(localStorage.getItem("mapip-bvi-line") ?? "1.6"));
+  const [hideImages, setHideImages] = useState<boolean>(() => localStorage.getItem("mapip-bvi-images") === "1");
+  const [scheme, setScheme] = useState<"wb" | "bw" | "blue">(
+    () => (localStorage.getItem("mapip-bvi-scheme") as "wb" | "bw" | "blue" | null) ?? "wb",
+  );
 
   useEffect(() => {
-    document.body.classList.toggle("visually-impaired-mode", highContrast);
-    localStorage.setItem("mapip-contrast", highContrast ? "1" : "0");
-  }, [highContrast]);
+    document.body.classList.toggle("visually-impaired-mode", impairedMode);
+    document.body.classList.toggle("bvi-wb", impairedMode && scheme === "wb");
+    document.body.classList.toggle("bvi-bw", impairedMode && scheme === "bw");
+    document.body.classList.toggle("bvi-blue", impairedMode && scheme === "blue");
+    document.body.classList.toggle("bvi-hide-images", impairedMode && hideImages);
+    document.documentElement.style.setProperty("--bvi-font-scale", impairedMode ? String(fontScale) : "1");
+    document.documentElement.style.setProperty("--bvi-line-height", impairedMode ? String(lineHeight) : "1.35");
+    localStorage.setItem("mapip-contrast", impairedMode ? "1" : "0");
+    localStorage.setItem("mapip-bvi-font", String(fontScale));
+    localStorage.setItem("mapip-bvi-line", String(lineHeight));
+    localStorage.setItem("mapip-bvi-images", hideImages ? "1" : "0");
+    localStorage.setItem("mapip-bvi-scheme", scheme);
+  }, [impairedMode, fontScale, lineHeight, hideImages, scheme]);
 
-  const toggleContrast = () => setHighContrast((v) => !v);
+  const toggleImpaired = () => setImpairedMode((v) => !v);
 
   return (
     <Routes>
@@ -70,8 +84,40 @@ export default function App() {
             <header className="legacy-hero">
               <img src={legacyLogo} className="legacy-logo-image" alt="Логотип MAPIP" />
               <h1 className="legacy-title">Сделаем с Вами мир доступнее</h1>
-              <HeaderAuth highContrast={highContrast} onToggleContrast={toggleContrast} />
+              <HeaderAuth impairedMode={impairedMode} onToggleImpaired={toggleImpaired} />
             </header>
+            {impairedMode && (
+              <section className="bvi-panel" aria-label="Настройки версии для слабовидящих">
+                <label>
+                  Размер шрифта
+                  <select value={fontScale} onChange={(e) => setFontScale(Number(e.target.value))}>
+                    <option value={1}>100%</option>
+                    <option value={1.15}>115%</option>
+                    <option value={1.3}>130%</option>
+                  </select>
+                </label>
+                <label>
+                  Межстрочный интервал
+                  <select value={lineHeight} onChange={(e) => setLineHeight(Number(e.target.value))}>
+                    <option value={1.4}>Стандартный</option>
+                    <option value={1.6}>Повышенный</option>
+                    <option value={1.8}>Максимальный</option>
+                  </select>
+                </label>
+                <label>
+                  Цветовая схема
+                  <select value={scheme} onChange={(e) => setScheme(e.target.value as "wb" | "bw" | "blue")}>
+                    <option value="wb">Черный на белом</option>
+                    <option value="bw">Белый на черном</option>
+                    <option value="blue">Синий контраст</option>
+                  </select>
+                </label>
+                <label className="bvi-checkbox">
+                  <input type="checkbox" checked={hideImages} onChange={(e) => setHideImages(e.target.checked)} />
+                  Скрыть изображения
+                </label>
+              </section>
+            )}
 
             <div className="top-bar">
               <div className="top-bar-left">

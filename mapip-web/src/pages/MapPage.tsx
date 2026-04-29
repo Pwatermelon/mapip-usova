@@ -109,6 +109,7 @@ export function MapPage() {
   const [filterDisability, setFilterDisability] = useState<string[]>([]);
   const [filterAccessibility, setFilterAccessibility] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [mapTab, setMapTab] = useState<"objects" | "router">("objects");
 
   objectsRef.current = objects;
 
@@ -551,6 +552,17 @@ export function MapPage() {
 
   return (
     <>
+    <section className="embedded-router-section">
+      <div className="field-row" style={{ marginBottom: 10 }}>
+        <button type="button" className="btn btn-ghost" onClick={() => setMapTab("objects")}>
+          Карта доступности
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => setMapTab("router")}>
+          Маршрутизатор
+        </button>
+      </div>
+    </section>
+    {mapTab === "objects" ? (
     <div className="map-layout">
       <aside className="side-panel">
         <div className="toolbar-header">
@@ -849,10 +861,11 @@ export function MapPage() {
         )}
       </div>
     </div>
-    <section className="embedded-router-section">
-      <h2>Маршрутизатор доступности</h2>
-      <RouteMapWidget />
-    </section>
+    ) : (
+      <section className="embedded-router-section">
+        <RouteMapWidget />
+      </section>
+    )}
     </>
   );
 }
