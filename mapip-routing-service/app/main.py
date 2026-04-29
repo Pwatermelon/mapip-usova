@@ -81,6 +81,85 @@ def _has_ors_2007(text: str | None) -> bool:
     return bool(re.search(r'"code"\s*:\s*2007|response format is not supported', text, re.IGNORECASE))
 
 
+def _has_unknown_alternative_routes(text: str | None) -> bool:
+    if not text:
+        return False
+    return bool(re.search(r"unknown parameter.+alternative_routes|code\"\s*:\s*2012", text, re.IGNORECASE))
+
+
+async def _post_ors_points(profile: str, points: list[list[float]]) -> httpx.Response:
+    return await _post_ors(profile, {"coordinates": points})
+
+
+def _bbox_for_points(points: list[list[float]], pad: float = 0.01) -> tuple[float, float, float, float]:
+    lons = [p[0] for p in points]
+    lats = [p[1] for p in points]
+    return min(lons) - pad, min(lats) - pad, max(lons) + pad, max(lats) + pad
+
+
+async def _fetch_accessibility_candidates(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    profile: str,
+    limit: int,
+) -> list[list[float]]:
+    if profile == "wheelchair":
+        clauses = """
+          node["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["kerb"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["ramp"]({min_lat},{min_lon},{max_lat},{max_lon});
+          way["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
+        """
+    else:
+        clauses = """
+          node["amenity"="toilets"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["amenity"="drinking_water"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["tourism"="museum"]({min_lat},{min_lon},{max_lat},{max_lon});
+        """
+    query = f"""
+    [out:json][timeout:20];
+    (
+      {clauses}
+    );
+    out center tags;
+    """.format(min_lat=min_lat, min_lon=min_lon, max_lat=max_lat, max_lon=max_lon)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(
+            "https://overpass-api.de/api/interpreter",
+            data={"data": query},
+            headers={"User-Agent": settings.nominatim_user_agent},
+        )
+    if not r.is_success:
+        return []
+    data = r.json()
+    out: list[list[float]] = []
+    for el in data.get("elements", []):
+        lat = el.get("lat")
+        lon = el.get("lon")
+        if lat is None or lon is None:
+            center = el.get("center") or {}
+            lat = center.get("lat")
+            lon = center.get("lon")
+        if lat is None or lon is None:
+            continue
+        out.append([float(lon), float(lat)])
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _merge_geojson_features(collections: list[dict[str, Any]]) -> dict[str, Any]:
+    features: list[dict[str, Any]] = []
+    for c in collections:
+        for f in c.get("features", []):
+            f_props = dict(f.get("properties") or {})
+            f_props["routeIndex"] = len(features)
+            features.append({**f, "properties": f_props})
+    return {"type": "FeatureCollection", "features": features}
+
+
 async def _post_ors_json_geo(profile: str, payload: dict[str, Any]) -> httpx.Response:
     # Fallback на json endpoint ORS.
     url = f"https://api.openrouteservice.org/v2/directions/{profile}"
@@ -203,7 +282,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             },
         }
         r = await _post_ors(profile, payload)
-        if not r.is_success:
+        if not r.is_success or _has_unknown_alternative_routes(r.text):
             r = await _post_ors(profile, {"coordinates": coordinates})
     else:
         r = await _post_ors(profile, {"coordinates": coordinates})
@@ -223,18 +302,82 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         if alt > 1:
             fallback_payload["options"] = {"alternative_routes": {"target_count": alt, "weight_factor": 1.45}}
         r_json = await _post_ors_json_geo(profile, fallback_payload)
+        if (_has_unknown_alternative_routes(r_json.text) and alt > 1) or (
+            not r_json.is_success and alt > 1
+        ):
+            r_json = await _post_ors_json_geo(profile, {"coordinates": coordinates})
         if _has_ors_2007(r_json.text) or not r_json.is_success:
             for fallback_profile in ("foot-walking", "driving-car"):
                 if fallback_profile == profile:
                     continue
                 r_json = await _post_ors_json_geo(fallback_profile, fallback_payload)
+                if (_has_unknown_alternative_routes(r_json.text) and alt > 1) or (
+                    not r_json.is_success and alt > 1
+                ):
+                    r_json = await _post_ors_json_geo(fallback_profile, {"coordinates": coordinates})
                 if r_json.is_success and not _has_ors_2007(r_json.text):
                     break
         if not r_json.is_success or _has_ors_2007(r_json.text):
             raise HTTPException(status_code=r_json.status_code, detail=r_json.text[:2000])
-        return _json_route_to_geojson(r_json.json())
+        main_geo = _json_route_to_geojson(r_json.json())
+        if alt <= 1:
+            return main_geo
 
-    return r.json()
+        # Реальные альтернативы через разные точки доступной инфраструктуры.
+        min_lon, min_lat, max_lon, max_lat = _bbox_for_points(coordinates)
+        candidates = await _fetch_accessibility_candidates(
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
+            profile=profile,
+            limit=max(8, alt * 3),
+        )
+        routes: list[dict[str, Any]] = [main_geo]
+        for via in candidates:
+            if len(routes) >= alt:
+                break
+            r_via = await _post_ors_points(profile, [coordinates[0], via, coordinates[1]])
+            if not r_via.is_success or _has_ors_2007(r_via.text):
+                continue
+            try:
+                via_geo = r_via.json()
+            except Exception:
+                continue
+            if via_geo.get("features"):
+                routes.append(via_geo)
+        return _merge_geojson_features(routes)
+
+    base_geo = r.json()
+    if alt <= 1:
+        return base_geo
+    # Если ORS вернул меньше альтернатив, чем просили, добавляем через POI.
+    have = len(base_geo.get("features", []))
+    if have >= alt:
+        return base_geo
+    min_lon, min_lat, max_lon, max_lat = _bbox_for_points(coordinates)
+    candidates = await _fetch_accessibility_candidates(
+        min_lon=min_lon,
+        min_lat=min_lat,
+        max_lon=max_lon,
+        max_lat=max_lat,
+        profile=profile,
+        limit=max(8, alt * 3),
+    )
+    routes: list[dict[str, Any]] = [base_geo]
+    for via in candidates:
+        if have + len(routes) - 1 >= alt:
+            break
+        r_via = await _post_ors_points(profile, [coordinates[0], via, coordinates[1]])
+        if not r_via.is_success or _has_ors_2007(r_via.text):
+            continue
+        try:
+            via_geo = r_via.json()
+        except Exception:
+            continue
+        if via_geo.get("features"):
+            routes.append(via_geo)
+    return _merge_geojson_features(routes)
 
 
 @app.get("/v1/overpass/objects")
