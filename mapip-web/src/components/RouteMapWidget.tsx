@@ -84,6 +84,7 @@ export function RouteMapWidget() {
   const fromMarkerRef = useRef<maplibregl.Marker | null>(null);
   const toMarkerRef = useRef<maplibregl.Marker | null>(null);
   const meMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const geoWatchIdRef = useRef<number | null>(null);
   const fromPointRef = useRef<[number, number] | null>(null);
   const toPointRef = useRef<[number, number] | null>(null);
   const [fromQ, setFromQ] = useState("");
@@ -98,7 +99,7 @@ export function RouteMapWidget() {
   const [fromPoint, setFromPoint] = useState<[number, number] | null>(null);
   const [toPoint, setToPoint] = useState<[number, number] | null>(null);
   const [myPoint, setMyPoint] = useState<[number, number] | null>(null);
-  const [useMyLocationRouting, setUseMyLocationRouting] = useState(true);
+  const [useMyLocationRouting, setUseMyLocationRouting] = useState(false);
 
   useEffect(() => {
     fromPointRef.current = fromPoint;
@@ -276,22 +277,41 @@ export function RouteMapWidget() {
   }, [myPoint]);
 
   useEffect(() => {
+    if (!useMyLocationRouting) {
+      if (geoWatchIdRef.current != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(geoWatchIdRef.current);
+        geoWatchIdRef.current = null;
+      }
+      return;
+    }
     if (!navigator.geolocation) {
       setErr("Геолокация не поддерживается браузером.");
       return;
     }
-    const watchId = navigator.geolocation.watchPosition(
+    setErr(null);
+    navigator.geolocation.getCurrentPosition(
       (pos) => {
         const point: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         setMyPoint(point);
       },
-      () => {
-        setErr("Нет доступа к геолокации. Разрешите доступ к местоположению в браузере.");
-      },
+      () => setErr("Нет доступа к геолокации. Разрешите доступ к местоположению в браузере."),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 3000 },
     );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+    geoWatchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        setMyPoint(point);
+      },
+      () => setErr("Нет доступа к геолокации. Разрешите доступ к местоположению в браузере."),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 3000 },
+    );
+    return () => {
+      if (geoWatchIdRef.current != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(geoWatchIdRef.current);
+        geoWatchIdRef.current = null;
+      }
+    };
+  }, [useMyLocationRouting]);
 
   useEffect(() => {
     if (!useMyLocationRouting || !myPoint) return;
