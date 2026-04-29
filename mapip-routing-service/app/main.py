@@ -66,6 +66,14 @@ def _parse_lat_lon_pair(value: Any, field: str) -> list[float]:
         raise HTTPException(status_code=400, detail=f"{field}: неверные координаты") from e
 
 
+async def _post_ors(profile: str, payload: dict[str, Any]) -> httpx.Response:
+    url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
+    params = {"api_key": settings.openroute_api_key}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        return await client.post(url, params=params, headers=headers, json=payload)
+
+
 @app.post("/v1/directions/geojson")
 async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     """
@@ -101,26 +109,26 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         alt = 1
     alt = max(1, min(3, alt))
 
-    url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
-    params = {"api_key": settings.openroute_api_key}
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if alt > 1:
+        payload: dict[str, Any] = {
+            "coordinates": coordinates,
+            "options": {
+                "alternative_routes": {"target_count": alt, "weight_factor": 1.45}
+            },
+        }
+        r = await _post_ors(profile, payload)
+        if not r.is_success:
+            r = await _post_ors(profile, {"coordinates": coordinates})
+    else:
+        r = await _post_ors(profile, {"coordinates": coordinates})
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        if alt > 1:
-            payload: dict[str, Any] = {
-                "coordinates": coordinates,
-                "options": {
-                    "alternative_routes": {"target_count": alt, "weight_factor": 1.45}
-                },
-            }
-            r = await client.post(url, params=params, headers=headers, json=payload)
-            if not r.is_success:
-                payload = {"coordinates": coordinates}
-                r = await client.post(url, params=params, headers=headers, json=payload)
-        else:
-            r = await client.post(
-                url, params=params, headers=headers, json={"coordinates": coordinates}
-            )
+    if (
+        not r.is_success
+        and profile == "wheelchair"
+        and '"code":2007' in r.text
+    ):
+        # ORS периодически отдает 2007 для geojson на wheelchair; fallback на foot-walking.
+        r = await _post_ors("foot-walking", {"coordinates": coordinates})
 
     if not r.is_success:
         raise HTTPException(status_code=r.status_code, detail=r.text[:2000])

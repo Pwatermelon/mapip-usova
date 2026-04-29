@@ -465,6 +465,12 @@ body {
   text-align: center;
 }
 
+.legacy-logo-image {
+  width: 84px;
+  height: auto;
+  margin-left: 8px;
+}
+
 .legacy-title {
   margin: 0;
   text-align: center;
@@ -629,6 +635,18 @@ button.btn-ghost {
   line-height: 1.5;
 }
 
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.info-page hr {
+  border: none;
+  border-top: 1px solid #d1d5db;
+  margin: 16px 0;
+}
+
 body.visually-impaired-mode {
   background: #fff;
   color: #000;
@@ -656,6 +674,88 @@ body.visually-impaired-mode input,
 body.visually-impaired-mode select,
 body.visually-impaired-mode textarea {
   border-color: #000;
+}
+
+.legacy-filter-card {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #b8dafd;
+  border-radius: 8px;
+  background: #fff;
+  display: grid;
+  gap: 4px;
+}
+
+.legacy-categories {
+  z-index: 3;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.categoriesButton {
+  color: #000;
+  border: 2px solid #b8dafd;
+  transition: background 0.3s, transform 0.2s;
+  background-color: #fff;
+  border-radius: 20px;
+  padding: 6px 12px;
+}
+
+.categoriesButton.active {
+  border-color: #24c73da9;
+  transform: scale(1.05);
+}
+
+.inline-map {
+  height: 280px;
+  border: 2px solid #b8dafd;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.score-badge {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #b8dafd;
+  background: #f0f7ff;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.about-text {
+  margin: 0 0 12px !important;
+}
+
+.toolbar-header {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 8px;
+}
+
+.menu-icon-btn {
+  border: none;
+  background: #1e90ff;
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.slide-menu-open {
+  border: 1px solid #b8dafd;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fff;
 }
 
 @media (max-width: 1200px) {

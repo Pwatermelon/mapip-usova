@@ -42,12 +42,26 @@ function bboxFromLngLats(coords: number[][]): [[number, number], [number, number
 export function RouteMapWidget() {
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const fromMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const toMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const fromPointRef = useRef<[number, number] | null>(null);
+  const toPointRef = useRef<[number, number] | null>(null);
   const [fromQ, setFromQ] = useState("");
   const [toQ, setToQ] = useState("");
-  const [profile, setProfile] = useState("wheelchair");
+  const [profile, setProfile] = useState("foot-walking");
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [objects, setObjects] = useState<MapObject[]>([]);
+  const [fromPoint, setFromPoint] = useState<[number, number] | null>(null);
+  const [toPoint, setToPoint] = useState<[number, number] | null>(null);
+
+  useEffect(() => {
+    fromPointRef.current = fromPoint;
+  }, [fromPoint]);
+
+  useEffect(() => {
+    toPointRef.current = toPoint;
+  }, [toPoint]);
 
   useEffect(() => {
     void (async () => {
@@ -94,11 +108,71 @@ export function RouteMapWidget() {
         paint: { "line-color": "#22c55e", "line-width": 5, "line-opacity": 0.9 },
       });
     });
+    map.on("click", (e) => {
+      const point: [number, number] = [e.lngLat.lat, e.lngLat.lng];
+      const text = `${point[0].toFixed(6)}, ${point[1].toFixed(6)}`;
+      if (!fromPointRef.current || (fromPointRef.current && toPointRef.current)) {
+        setFromPoint(point);
+        setToPoint(null);
+        setFromQ(text);
+        setToQ("");
+      } else {
+        setToPoint(point);
+        setToQ(text);
+      }
+    });
     return () => {
+      fromMarkerRef.current?.remove();
+      toMarkerRef.current?.remove();
       map.remove();
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !fromPoint) return;
+    fromMarkerRef.current?.remove();
+    fromMarkerRef.current = new maplibregl.Marker({ color: "#2563eb" })
+      .setLngLat([fromPoint[1], fromPoint[0]])
+      .setPopup(new maplibregl.Popup({ offset: 18 }).setText("Старт"))
+      .addTo(map);
+  }, [fromPoint]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!toPoint) {
+      toMarkerRef.current?.remove();
+      toMarkerRef.current = null;
+      return;
+    }
+    toMarkerRef.current?.remove();
+    toMarkerRef.current = new maplibregl.Marker({ color: "#dc2626" })
+      .setLngLat([toPoint[1], toPoint[0]])
+      .setPopup(new maplibregl.Popup({ offset: 18 }).setText("Финиш"))
+      .addTo(map);
+  }, [toPoint]);
+
+  const parseLatLon = (value: string): [number, number] | null => {
+    const m = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)$/);
+    if (!m) return null;
+    const lat = Number(m[1]);
+    const lon = Number(m[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    return [lat, lon];
+  };
+
+  const resolvePoint = async (text: string, selectedPoint: [number, number] | null) => {
+    if (selectedPoint) return selectedPoint;
+    const parsed = parseLatLon(text);
+    if (parsed) return parsed;
+    const enc = encodeURIComponent(text.trim());
+    const hits = await fetchJson<{ lat: number; lon: number }[]>(`${routingBase}/v1/geocode/search?q=${enc}&limit=1`);
+    if (!hits.length) throw new Error("Не удалось найти одну из точек.");
+    return [hits[0].lat, hits[0].lon] as [number, number];
+  };
 
   const build = async () => {
     setErr(null);
@@ -109,21 +183,10 @@ export function RouteMapWidget() {
       return;
     }
     try {
-      const enc = (s: string) => encodeURIComponent(s.trim());
-      const fromHits = await fetchJson<{ lat: number; lon: number }[]>(
-        `${routingBase}/v1/geocode/search?q=${enc(fromQ)}&limit=1`,
-      );
-      const toHits = await fetchJson<{ lat: number; lon: number }[]>(
-        `${routingBase}/v1/geocode/search?q=${enc(toQ)}&limit=1`,
-      );
-      if (!fromHits.length || !toHits.length) {
-        setErr("Не удалось найти одну из точек.");
-        return;
-      }
-      const fromCoord = [fromHits[0].lat, fromHits[0].lon] as [number, number];
-      const toCoord = [toHits[0].lat, toHits[0].lon] as [number, number];
-
-      const res = await fetch(`${routingBase}/v1/directions/geojson`, {
+      const fromCoord = await resolvePoint(fromQ, fromPoint);
+      const toCoord = await resolvePoint(toQ, toPoint);
+      let requestProfile = profile;
+      let res = await fetch(`${routingBase}/v1/directions/geojson`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -133,7 +196,21 @@ export function RouteMapWidget() {
           alternativeCount: 1,
         }),
       });
-      const text = await res.text();
+      let text = await res.text();
+      if (!res.ok && text.includes("\"code\":2007") && profile === "wheelchair") {
+        requestProfile = "foot-walking";
+        res = await fetch(`${routingBase}/v1/directions/geojson`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from: fromCoord,
+            to: toCoord,
+            profile: requestProfile,
+            alternativeCount: 1,
+          }),
+        });
+        text = await res.text();
+      }
       if (!res.ok) {
         setErr(errorTextFromResponse(res, text));
         return;
@@ -170,7 +247,7 @@ export function RouteMapWidget() {
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
       setMsg(
-        `Маршрут: ~${km} км${min != null ? `, ~${min} мин` : ""}. Участки без данных об объектах можно подсветить на клиенте, сравнивая с ${objects.length} объектами из core API.`,
+        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Участки без данных об объектах можно подсветить на клиенте, сравнивая с ${objects.length} объектами из core API.`,
       );
     } catch (e) {
       setErr(String(e));
@@ -193,6 +270,7 @@ export function RouteMapWidget() {
           <label>Куда</label>
           <input value={toQ} onChange={(e) => setToQ(e.target.value)} placeholder="Адрес или место" />
         </div>
+        <p className="muted small">Можно кликнуть по карте: первый клик — старт, второй — финиш.</p>
         <div className="field">
           <label>Профиль ORS</label>
           <select value={profile} onChange={(e) => setProfile(e.target.value)}>

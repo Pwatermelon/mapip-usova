@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
-from app.routers import comments, map_objects, routes_db, users
+from app.routers import comments, legacy, map_objects, routes_db, users
 
 app = FastAPI(
     title="MAPIP Core API",
@@ -24,6 +24,7 @@ app.include_router(map_objects.router)
 app.include_router(comments.router)
 app.include_router(users.router)
 app.include_router(routes_db.router)
+app.include_router(legacy.router)
 
 
 @app.get("/")

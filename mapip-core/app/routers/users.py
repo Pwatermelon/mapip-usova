@@ -113,3 +113,48 @@ def remove_favorite(
     db.delete(f)
     db.commit()
     return "Элемент успешно удален из избранного."
+
+
+@router.get("/GetUser/{email}")
+def get_user_by_email(email: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    u = db.query(User).filter(User.Email == email).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {
+        "id": u.Id,
+        "name": u.Name,
+        "email": u.Email,
+        "type": u.Type,
+        "password": u.Password,
+        "score": u.Score,
+    }
+
+
+@router.put("/EditUser/{user_id}")
+def edit_user(user_id: int, body: dict[str, Any], db: Session = Depends(get_db)) -> dict[str, str]:
+    u = db.query(User).filter(User.Id == user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    email = body.get("email")
+    category = body.get("category")
+    password = body.get("password")
+    if email is not None:
+        u.Email = str(email).strip()
+    if category is not None:
+        u.Type = int(category)
+    if password is not None:
+        u.Password = str(password)
+    db.commit()
+    return {"message": "Пользователь обновлен"}
+
+
+@router.delete("/DeleteUser/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+    u = db.query(User).filter(User.Id == user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    db.query(Favorite).filter(Favorite.UserID == user_id).delete()
+    db.query(Comment).filter(Comment.UserId == user_id).delete()
+    db.delete(u)
+    db.commit()
+    return {"message": "Пользователь удален"}

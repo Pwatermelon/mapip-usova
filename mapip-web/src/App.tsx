@@ -2,10 +2,15 @@ import { useEffect, useState } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { LoginModal } from "./components/LoginModal";
+import legacyLogo from "./assets/legacy-logo.svg";
+import { AboutPage } from "./pages/AboutPage";
+import { AddInfoPage } from "./pages/AddInfoPage";
 import { EmbedRouterPage } from "./pages/EmbedRouterPage";
-import { InfoPage } from "./pages/InfoPage";
+import { EditInfoPage } from "./pages/EditInfoPage";
+import { ExpertPanelPage } from "./pages/ExpertPanelPage";
 import { MapPage } from "./pages/MapPage";
 import { RouterPage } from "./pages/RouterPage";
+import { StatsPage } from "./pages/StatsPage";
 
 type HeaderAuthProps = {
   highContrast: boolean;
@@ -64,9 +69,7 @@ export default function App() {
         element={
           <div className="app-shell">
             <header className="legacy-hero">
-              <div className="legacy-logo" aria-hidden>
-                🌍
-              </div>
+              <img src={legacyLogo} className="legacy-logo-image" alt="Логотип MAPIP" />
               <h1 className="legacy-title">Сделаем с Вами мир доступнее</h1>
               <HeaderAuth highContrast={highContrast} onToggleContrast={toggleContrast} />
             </header>
@@ -102,51 +105,11 @@ export default function App() {
             <main className="main">
               <Routes>
                 <Route path="/" element={<MapPage />} />
-                <Route
-                  path="/add"
-                  element={
-                    <InfoPage
-                      title="Добавить информацию"
-                      text="Раздел перенесен в единый React-интерфейс. Следующим шагом подключаем форму добавления из legacy API без перехода на отдельный HTML."
-                    />
-                  }
-                />
-                <Route
-                  path="/edit"
-                  element={
-                    <InfoPage
-                      title="Редактировать информацию"
-                      text="Страница теперь живет в SPA и использует ту же шапку и авторизацию. Можно продолжить перенос формы редактирования в этот раздел."
-                    />
-                  }
-                />
-                <Route
-                  path="/expert"
-                  element={
-                    <InfoPage
-                      title="Панель эксперта"
-                      text="Панель вынесена в общий роутинг приложения, чтобы больше не было отдельных html-страниц с разной логикой кнопок входа."
-                    />
-                  }
-                />
-                <Route
-                  path="/stats"
-                  element={
-                    <InfoPage
-                      title="Статистика"
-                      text="Раздел статистики подключен в единый интерфейс. При необходимости добавим реальные графики и метрики из API."
-                    />
-                  }
-                />
-                <Route
-                  path="/about"
-                  element={
-                    <InfoPage
-                      title="О проекте"
-                      text="Информационная страница теперь в том же приложении и дизайне. Навигация и кнопки авторизации работают единообразно."
-                    />
-                  }
-                />
+                <Route path="/add" element={<AddInfoPage />} />
+                <Route path="/edit" element={<EditInfoPage />} />
+                <Route path="/expert" element={<ExpertPanelPage />} />
+                <Route path="/stats" element={<StatsPage />} />
+                <Route path="/about" element={<AboutPage />} />
                 <Route path="/router" element={<RouterPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

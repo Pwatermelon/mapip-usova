@@ -17,6 +17,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": { target: core, changeOrigin: true },
+      "/client": { target: core, changeOrigin: true },
       "/GetSocialMapObject": { target: core, changeOrigin: true },
       "/routing": {
         target: routing,
@@ -26,6 +27,7 @@ export default defineConfig({
       "/comments": { target: flask, changeOrigin: true },
       "/recommendations": { target: flask, changeOrigin: true },
       "/mapip/api": { target: core, changeOrigin: true, rewrite: (p) => p.replace(/^\/mapip/, "") || "/" },
+      "/mapip/client": { target: core, changeOrigin: true, rewrite: (p) => p.replace(/^\/mapip/, "") || "/" },
       "/mapip/GetSocialMapObject": {
         target: core,
         changeOrigin: true,
