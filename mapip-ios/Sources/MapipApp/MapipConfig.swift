@@ -2,6 +2,20 @@ import Foundation
 
 /// Базовый URL gateway (nginx с вебом и прокси на core + routing).
 enum MapipConfig {
-    /// Замените на адрес вашего сервера (Docker порт 8088 или продакшен).
-    static var baseURL: URL = URL(string: "http://127.0.0.1:8088")!
+    static let baseURLKey = "mapip.baseURL"
+    static let defaultBaseURL = "http://127.0.0.1:8088"
+
+    static var baseURLString: String {
+        get {
+            let raw = UserDefaults.standard.string(forKey: baseURLKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (raw?.isEmpty == false ? raw : defaultBaseURL)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: baseURLKey)
+        }
+    }
+
+    static var baseURL: URL {
+        URL(string: baseURLString) ?? URL(string: defaultBaseURL)!
+    }
 }

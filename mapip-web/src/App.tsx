@@ -9,7 +9,6 @@ import { EmbedRouterPage } from "./pages/EmbedRouterPage";
 import { EditInfoPage } from "./pages/EditInfoPage";
 import { ExpertPanelPage } from "./pages/ExpertPanelPage";
 import { MapPage } from "./pages/MapPage";
-import { RouterPage } from "./pages/RouterPage";
 import { StatsPage } from "./pages/StatsPage";
 
 type HeaderAuthProps = {
@@ -95,9 +94,6 @@ export default function App() {
                   <NavLink to="/about" className={({ isActive }) => (isActive ? "active" : "")}>
                     О проекте
                   </NavLink>
-                  <NavLink to="/router" className={({ isActive }) => (isActive ? "active" : "")}>
-                    Маршрутизатор
-                  </NavLink>
                 </nav>
               </div>
             </div>
@@ -110,7 +106,7 @@ export default function App() {
                 <Route path="/expert" element={<ExpertPanelPage />} />
                 <Route path="/stats" element={<StatsPage />} />
                 <Route path="/about" element={<AboutPage />} />
-                <Route path="/router" element={<RouterPage />} />
+                <Route path="/router" element={<Navigate to="/" replace />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </main>

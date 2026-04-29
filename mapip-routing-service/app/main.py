@@ -219,12 +219,15 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
 
     if not r.is_success or _has_ors_2007(r.text):
         # Остаемся строго в ORS: fallback на directions/{profile} + geometry_format=geojson.
-        r_json = await _post_ors_json_geo(profile, {"coordinates": coordinates})
+        fallback_payload: dict[str, Any] = {"coordinates": coordinates}
+        if alt > 1:
+            fallback_payload["options"] = {"alternative_routes": {"target_count": alt, "weight_factor": 1.45}}
+        r_json = await _post_ors_json_geo(profile, fallback_payload)
         if _has_ors_2007(r_json.text) or not r_json.is_success:
             for fallback_profile in ("foot-walking", "driving-car"):
                 if fallback_profile == profile:
                     continue
-                r_json = await _post_ors_json_geo(fallback_profile, {"coordinates": coordinates})
+                r_json = await _post_ors_json_geo(fallback_profile, fallback_payload)
                 if r_json.is_success and not _has_ors_2007(r_json.text):
                     break
         if not r_json.is_success or _has_ors_2007(r_json.text):

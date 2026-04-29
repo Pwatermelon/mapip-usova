@@ -3,12 +3,16 @@ import MapKit
 
 /// Построение маршрута через routing API (отдельный сервис за `/routing/`).
 struct RouterScreen: View {
+    @AppStorage(MapipConfig.baseURLKey) private var serverURL = MapipConfig.defaultBaseURL
     @State private var fromText = ""
     @State private var toText = ""
     @State private var profile = "wheelchair"
+    @State private var alternatives = 3
     @State private var message: String?
     @State private var error: String?
+    @State private var showServerSettings = false
     @State private var coords: [CLLocationCoordinate2D] = []
+    @State private var objects: [MapObjectDTO] = []
     @State private var position: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 51.533557, longitude: 46.034257),
@@ -28,6 +32,12 @@ struct RouterScreen: View {
                     Text("Пешеход").tag("foot-walking")
                 }
                 .pickerStyle(.segmented)
+                Picker("Вариантов", selection: $alternatives) {
+                    Text("1").tag(1)
+                    Text("2").tag(2)
+                    Text("3").tag(3)
+                }
+                .pickerStyle(.segmented)
 
                 Button("Построить") {
                     Task { await build() }
@@ -42,16 +52,52 @@ struct RouterScreen: View {
                 }
 
                 Map(position: $position) {
+                    ForEach(objects) { o in
+                        Annotation(o.display_name, coordinate: CLLocationCoordinate2D(latitude: o.x, longitude: o.y)) {
+                            Circle().fill(.blue).frame(width: 8, height: 8)
+                        }
+                    }
                     if coords.count >= 2 {
                         MapPolyline(coordinates: coords)
-                            .stroke(.green, lineWidth: 5)
+                            .stroke(.purple, lineWidth: 5)
                     }
                 }
                 .mapStyle(.standard)
                 .frame(minHeight: 280)
             }
             .padding()
-            .navigationTitle("Маршрут")
+            .navigationTitle("Маршрутизатор")
+            .task { await loadObjects() }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Сервер") {
+                        showServerSettings = true
+                    }
+                }
+            }
+            .sheet(isPresented: $showServerSettings) {
+                NavigationStack {
+                    Form {
+                        Section("URL сервера маршрутизатора") {
+                            TextField("https://host:port", text: $serverURL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                    }
+                    .navigationTitle("Настройки сервера")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Закрыть") { showServerSettings = false }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Сохранить") {
+                                MapipConfig.baseURLString = serverURL
+                                showServerSettings = false
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -74,7 +120,8 @@ struct RouterScreen: View {
             let data = try await api.buildRoute(
                 from: [fa.lat, fa.lon],
                 to: [fb.lat, fb.lon],
-                profile: profile
+                profile: profile,
+                alternativeCount: alternatives
             )
             let line = try decodeLineCoordinates(from: data)
             coords = line.map { CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) }
@@ -84,6 +131,16 @@ struct RouterScreen: View {
             message = "Маршрут получен (\(coords.count) точек)"
         } catch {
             self.error = String(describing: error)
+        }
+    }
+
+    private func loadObjects() async {
+        do {
+            let api = MapipAPI()
+            objects = try await api.fetchMapObjects()
+        } catch {
+            // keep map usable even when core API unavailable
+            objects = []
         }
     }
 }

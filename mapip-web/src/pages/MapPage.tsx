@@ -2,6 +2,7 @@ import maplibregl, { Map as MLMap } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../AuthContext";
 import { coreBase, fetchJson, routingBase } from "../api";
+import { RouteMapWidget } from "../components/RouteMapWidget";
 
 type MapObject = {
   id: number;
@@ -549,6 +550,7 @@ export function MapPage() {
   };
 
   return (
+    <>
     <div className="map-layout">
       <aside className="side-panel">
         <div className="toolbar-header">
@@ -847,5 +849,10 @@ export function MapPage() {
         )}
       </div>
     </div>
+    <section className="embedded-router-section">
+      <h2>Маршрутизатор доступности</h2>
+      <RouteMapWidget />
+    </section>
+    </>
   );
 }

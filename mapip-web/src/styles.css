@@ -633,6 +633,19 @@ button.btn-ghost {
   padding: 24px;
 }
 
+.embedded-router-section {
+  width: 92%;
+  margin: 12px auto;
+}
+
+.embedded-router-section > h2 {
+  margin: 0 0 8px;
+}
+
+.embedded-router-section .map-layout {
+  height: calc(100vh - 220px);
+}
+
 .info-page h2 {
   margin: 0 0 12px;
   color: #1f2937;

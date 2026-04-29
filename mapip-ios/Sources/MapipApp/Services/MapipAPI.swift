@@ -55,7 +55,7 @@ actor MapipAPI {
         return try JSONDecoder().decode([GeocodeHit].self, from: data)
     }
 
-    func buildRoute(from: [Double], to: [Double], profile: String) async throws -> Data {
+    func buildRoute(from: [Double], to: [Double], profile: String, alternativeCount: Int) async throws -> Data {
         let url = base.appendingPathComponent("routing/v1/directions/geojson")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -64,7 +64,7 @@ actor MapipAPI {
             "from": from,
             "to": to,
             "profile": profile,
-            "alternativeCount": 1,
+            "alternativeCount": alternativeCount,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, res) = try await session.data(for: req)

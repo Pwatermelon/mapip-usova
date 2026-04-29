@@ -56,6 +56,44 @@ function routeFeaturesFromOrs(data: OrsGeoJson): GeoJSON.Feature<GeoJSON.LineStr
   }));
 }
 
+function routeLatLonCoords(feature: GeoJSON.Feature<GeoJSON.LineString>): [number, number][] {
+  return (feature.geometry.coordinates ?? []).map((c) => [c[1], c[0]]);
+}
+
+function sqDist(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const dLat = aLat - bLat;
+  const dLon = aLon - bLon;
+  return dLat * dLat + dLon * dLon;
+}
+
+function infraScoreForRoute(
+  feature: GeoJSON.Feature<GeoJSON.LineString>,
+  coreObjects: MapObject[],
+  overpass: GeoJSON.Feature[],
+  profile: string,
+): number {
+  const route = routeLatLonCoords(feature);
+  if (!route.length) return 0;
+  const nearThresholdSq = 0.0012 * 0.0012; // ~130m
+  let score = 0;
+  for (const obj of coreObjects) {
+    const near = route.some(([lat, lon]) => sqDist(lat, lon, obj.x, obj.y) <= nearThresholdSq);
+    if (near) score += 2;
+  }
+  for (const poi of overpass) {
+    const coords = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
+    if (!coords || coords.length < 2) continue;
+    const poiLat = coords[1];
+    const poiLon = coords[0];
+    const near = route.some(([lat, lon]) => sqDist(lat, lon, poiLat, poiLon) <= nearThresholdSq);
+    if (!near) continue;
+    score += 3;
+    const tags = (poi.properties as { tags?: Record<string, string> } | undefined)?.tags ?? {};
+    if (profile === "wheelchair" && (tags.wheelchair || tags.ramp || tags.kerb)) score += 4;
+  }
+  return score;
+}
+
 function bboxFromLngLats(coords: number[][]): [[number, number], [number, number]] | null {
   if (!coords.length) return null;
   let minLon = coords[0][1];
@@ -469,7 +507,7 @@ export function RouteMapWidget() {
         setErr("Сервис маршрутов вернул не JSON (проверьте прокси /routing и ключ OPENROUTE_API_KEY).");
         return;
       }
-      const routeFeatures = routeFeaturesFromOrs(data);
+      const routeFeaturesRaw = routeFeaturesFromOrs(data);
       const coords = lineCoordsFromOrs(data);
       const routeColor =
         requestProfile === "wheelchair" ? "#7c3aed" : requestProfile === "driving-car" ? "#ef4444" : "#22c55e";
@@ -486,28 +524,35 @@ export function RouteMapWidget() {
           routeColor,
         ]);
       }
-      const fc: GeoJSON.FeatureCollection = {
-        type: "FeatureCollection",
-        features: routeFeatures,
-      };
-      if (map?.getSource("route")) {
-        (map.getSource("route") as maplibregl.GeoJSONSource).setData(fc);
-      }
       const bb = bboxFromLngLats(coords.map(([lat, lon]) => [lat, lon]));
       if (bb && map) map.fitBounds(bb, { padding: 48, maxZoom: 16 });
+      let overpassFeatures: GeoJSON.Feature[] = [];
       if (bb && map?.getSource("overpass-pois")) {
         const bbox = `${bb[0][0]},${bb[0][1]},${bb[1][0]},${bb[1][1]}`;
         try {
           const pois = await fetchJson<GeoJSON.FeatureCollection>(
             `${routingBase}/v1/overpass/objects?bbox=${encodeURIComponent(bbox)}&profile=${encodeURIComponent(requestProfile)}`,
           );
+          overpassFeatures = pois.features ?? [];
           (map.getSource("overpass-pois") as maplibregl.GeoJSONSource).setData(pois);
         } catch {
+          overpassFeatures = [];
           (map.getSource("overpass-pois") as maplibregl.GeoJSONSource).setData({
             type: "FeatureCollection",
             features: [],
           });
         }
+      }
+      const ranked = [...routeFeaturesRaw]
+        .map((f) => ({ feature: f, score: infraScoreForRoute(f, objects, overpassFeatures, requestProfile) }))
+        .sort((a, b) => b.score - a.score)
+        .map((row, idx) => ({ ...row.feature, properties: { ...(row.feature.properties ?? {}), routeIndex: idx, infraScore: row.score } }));
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: ranked,
+      };
+      if (map?.getSource("route")) {
+        (map.getSource("route") as maplibregl.GeoJSONSource).setData(fc);
       }
 
       const feat = data.features?.[0];
@@ -515,7 +560,7 @@ export function RouteMapWidget() {
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
       setMsg(
-        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${routeFeatures.length}. На карте также показаны объекты из Overpass/OSM + ${objects.length} объектов из core API.`,
+        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}. Приоритет: инфраструктура доступности (core + overpass), а не длина.`,
       );
     } catch (e) {
       setErr(String(e));
