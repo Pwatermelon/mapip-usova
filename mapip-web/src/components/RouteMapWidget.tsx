@@ -87,6 +87,8 @@ export function RouteMapWidget() {
   const geoWatchIdRef = useRef<number | null>(null);
   const fromSuggestReqRef = useRef(0);
   const toSuggestReqRef = useRef(0);
+  const fromSuggestTimerRef = useRef<number | null>(null);
+  const toSuggestTimerRef = useRef<number | null>(null);
   const fromPointRef = useRef<[number, number] | null>(null);
   const toPointRef = useRef<[number, number] | null>(null);
   const [fromQ, setFromQ] = useState("");
@@ -286,6 +288,11 @@ export function RouteMapWidget() {
       }
       return;
     }
+    if (!window.isSecureContext) {
+      setErr("Геолокация в браузере блокируется на http. Нужен https или localhost.");
+      setUseMyLocationRouting(false);
+      return;
+    }
     if (!navigator.geolocation) {
       setErr("Геолокация не поддерживается браузером.");
       return;
@@ -320,6 +327,13 @@ export function RouteMapWidget() {
     setFromPoint(myPoint);
     setFromQ(`${myPoint[0].toFixed(6)}, ${myPoint[1].toFixed(6)}`);
   }, [myPoint, useMyLocationRouting]);
+
+  useEffect(() => {
+    return () => {
+      if (fromSuggestTimerRef.current != null) window.clearTimeout(fromSuggestTimerRef.current);
+      if (toSuggestTimerRef.current != null) window.clearTimeout(toSuggestTimerRef.current);
+    };
+  }, []);
 
   const parseLatLon = (value: string): [number, number] | null => {
     const m = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)$/);
@@ -390,6 +404,14 @@ export function RouteMapWidget() {
         setToSuggestions(local);
       }
     }
+  };
+
+  const queueSuggestions = (q: string, target: "from" | "to") => {
+    const timerRef = target === "from" ? fromSuggestTimerRef : toSuggestTimerRef;
+    if (timerRef.current != null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      void loadSuggestions(q, target);
+    }, 260);
   };
 
   const build = async () => {
@@ -516,7 +538,7 @@ export function RouteMapWidget() {
             onChange={(e) => {
               setFromQ(e.target.value);
               setFromPoint(null);
-              void loadSuggestions(e.target.value, "from");
+              queueSuggestions(e.target.value, "from");
             }}
             onBlur={() => void resolveAndSetPoint("from")}
             placeholder={useMyLocationRouting ? "Текущее местоположение (live)" : "Адрес или место"}
@@ -549,7 +571,7 @@ export function RouteMapWidget() {
             onChange={(e) => {
               setToQ(e.target.value);
               setToPoint(null);
-              void loadSuggestions(e.target.value, "to");
+              queueSuggestions(e.target.value, "to");
             }}
             onBlur={() => void resolveAndSetPoint("to")}
             placeholder="Адрес или место"
