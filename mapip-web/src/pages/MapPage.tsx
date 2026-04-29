@@ -31,6 +31,11 @@ type OntologyInfo = {
 type RecommendationRow = { mapObject: MapObject; distance?: number };
 type Mode = "search" | "personal" | "popular" | "likes";
 type OrsGeoJson = GeoJSON.FeatureCollection & { features?: GeoJSON.Feature[] };
+const DEMO_OBJECTS: MapObject[] = [
+  { id: 80001, x: 51.533557, y: 46.034257, display_name: "Театр оперы (demo)", adress: "Саратов, центр", type: "Культура" },
+  { id: 80002, x: 51.5293, y: 46.0201, display_name: "Городской парк (demo)", adress: "Саратов, парк", type: "Туризм" },
+  { id: 80003, x: 51.5402, y: 46.0418, display_name: "Ж/д вокзал (demo)", adress: "Саратов, вокзал", type: "Транспортная инфраструктура" },
+];
 
 const disabilityLabels: Record<string, string> = {
   Г: "Для людей с нарушением слуха",
@@ -178,9 +183,10 @@ export function MapPage() {
     void (async () => {
       try {
         const data = await fetchJson<MapObject[]>(`${coreBase}/GetSocialMapObject`);
-        setObjects(data);
+        setObjects(data.length ? data : DEMO_OBJECTS);
       } catch (e) {
-        setErr(String(e));
+        setObjects(DEMO_OBJECTS);
+        setErr(`Основной API недоступен, показаны demo-объекты. ${String(e)}`);
       }
     })();
   }, []);

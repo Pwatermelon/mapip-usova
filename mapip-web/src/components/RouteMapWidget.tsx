@@ -4,6 +4,11 @@ import { coreBase, errorTextFromResponse, fetchJson, routingBase } from "../api"
 
 type MapObject = { id: number; x: number; y: number; display_name: string };
 type OrsGeoJson = GeoJSON.FeatureCollection & { features?: GeoJSON.Feature[] };
+const DEMO_OBJECTS: MapObject[] = [
+  { id: 90001, x: 51.533557, y: 46.034257, display_name: "Театр оперы (demo)" },
+  { id: 90002, x: 51.5293, y: 46.0201, display_name: "Городской парк (demo)" },
+  { id: 90003, x: 51.5402, y: 46.0418, display_name: "Ж/д вокзал (demo)" },
+];
 
 function lineCoordsFromOrs(data: OrsGeoJson): number[][] {
   const out: number[][] = [];
@@ -52,6 +57,8 @@ export function RouteMapWidget() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [objects, setObjects] = useState<MapObject[]>([]);
+  const [fromSuggestions, setFromSuggestions] = useState<{ lat: number; lon: number; display_name: string }[]>([]);
+  const [toSuggestions, setToSuggestions] = useState<{ lat: number; lon: number; display_name: string }[]>([]);
   const [fromPoint, setFromPoint] = useState<[number, number] | null>(null);
   const [toPoint, setToPoint] = useState<[number, number] | null>(null);
 
@@ -67,9 +74,9 @@ export function RouteMapWidget() {
     void (async () => {
       try {
         const data = await fetchJson<MapObject[]>(`${coreBase}/GetSocialMapObject`);
-        setObjects(data);
+        setObjects(data.length ? data : DEMO_OBJECTS);
       } catch {
-        setObjects([]);
+        setObjects(DEMO_OBJECTS);
       }
     })();
   }, []);
@@ -106,6 +113,22 @@ export function RouteMapWidget() {
         source: "route",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#22c55e", "line-width": 5, "line-opacity": 0.9 },
+      });
+      map.addSource("overpass-pois", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "overpass-pois-circles",
+        type: "circle",
+        source: "overpass-pois",
+        paint: {
+          "circle-radius": 6,
+          "circle-color": "#f59e0b",
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#7c2d12",
+          "circle-opacity": 0.9,
+        },
       });
     });
     map.on("click", (e) => {
@@ -174,6 +197,24 @@ export function RouteMapWidget() {
     return [hits[0].lat, hits[0].lon] as [number, number];
   };
 
+  const loadSuggestions = async (q: string, target: "from" | "to") => {
+    if (q.trim().length < 2) {
+      if (target === "from") setFromSuggestions([]);
+      else setToSuggestions([]);
+      return;
+    }
+    try {
+      const hits = await fetchJson<{ lat: number; lon: number; display_name: string }[]>(
+        `${routingBase}/v1/geocode/search?q=${encodeURIComponent(q.trim())}&limit=5`,
+      );
+      if (target === "from") setFromSuggestions(hits);
+      else setToSuggestions(hits);
+    } catch {
+      if (target === "from") setFromSuggestions([]);
+      else setToSuggestions([]);
+    }
+  };
+
   const build = async () => {
     setErr(null);
     setMsg(null);
@@ -197,7 +238,7 @@ export function RouteMapWidget() {
         }),
       });
       let text = await res.text();
-      if (!res.ok && text.includes("\"code\":2007") && profile === "wheelchair") {
+      if (!res.ok && /2007/.test(text)) {
         requestProfile = "foot-walking";
         res = await fetch(`${routingBase}/v1/directions/geojson`, {
           method: "POST",
@@ -223,6 +264,11 @@ export function RouteMapWidget() {
         return;
       }
       const coords = lineCoordsFromOrs(data);
+      const routeColor =
+        requestProfile === "wheelchair" ? "#7c3aed" : requestProfile === "driving-car" ? "#ef4444" : "#22c55e";
+      if (map?.getLayer("route-line")) {
+        map.setPaintProperty("route-line", "line-color", routeColor);
+      }
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
         features:
@@ -241,13 +287,27 @@ export function RouteMapWidget() {
       }
       const bb = bboxFromLngLats(coords.map(([lat, lon]) => [lat, lon]));
       if (bb && map) map.fitBounds(bb, { padding: 48, maxZoom: 16 });
+      if (bb && map?.getSource("overpass-pois")) {
+        const bbox = `${bb[0][0]},${bb[0][1]},${bb[1][0]},${bb[1][1]}`;
+        try {
+          const pois = await fetchJson<GeoJSON.FeatureCollection>(
+            `${routingBase}/v1/overpass/objects?bbox=${encodeURIComponent(bbox)}&profile=${encodeURIComponent(requestProfile)}`,
+          );
+          (map.getSource("overpass-pois") as maplibregl.GeoJSONSource).setData(pois);
+        } catch {
+          (map.getSource("overpass-pois") as maplibregl.GeoJSONSource).setData({
+            type: "FeatureCollection",
+            features: [],
+          });
+        }
+      }
 
       const feat = data.features?.[0];
       const summary = (feat?.properties as { summary?: { distance?: number; duration?: number } })?.summary;
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
       setMsg(
-        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Участки без данных об объектах можно подсветить на клиенте, сравнивая с ${objects.length} объектами из core API.`,
+        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. На карте также показаны объекты из Overpass/OSM + ${objects.length} объектов из core API.`,
       );
     } catch (e) {
       setErr(String(e));
@@ -264,11 +324,63 @@ export function RouteMapWidget() {
         </p>
         <div className="field">
           <label>Откуда</label>
-          <input value={fromQ} onChange={(e) => setFromQ(e.target.value)} placeholder="Адрес или место" />
+          <input
+            value={fromQ}
+            onChange={(e) => {
+              setFromQ(e.target.value);
+              void loadSuggestions(e.target.value, "from");
+            }}
+            placeholder="Адрес или место"
+          />
+          {fromSuggestions.length > 0 && (
+            <div className="search-results">
+              {fromSuggestions.map((s, i) => (
+                <div
+                  key={`from-${i}-${s.lat}-${s.lon}`}
+                  className="search-hit"
+                  onClick={() => {
+                    setFromQ(s.display_name);
+                    setFromPoint([s.lat, s.lon]);
+                    setFromSuggestions([]);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <p>{s.display_name}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="field">
           <label>Куда</label>
-          <input value={toQ} onChange={(e) => setToQ(e.target.value)} placeholder="Адрес или место" />
+          <input
+            value={toQ}
+            onChange={(e) => {
+              setToQ(e.target.value);
+              void loadSuggestions(e.target.value, "to");
+            }}
+            placeholder="Адрес или место"
+          />
+          {toSuggestions.length > 0 && (
+            <div className="search-results">
+              {toSuggestions.map((s, i) => (
+                <div
+                  key={`to-${i}-${s.lat}-${s.lon}`}
+                  className="search-hit"
+                  onClick={() => {
+                    setToQ(s.display_name);
+                    setToPoint([s.lat, s.lon]);
+                    setToSuggestions([]);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <p>{s.display_name}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <p className="muted small">Можно кликнуть по карте: первый клик — старт, второй — финиш.</p>
         <div className="field">

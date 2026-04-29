@@ -3,6 +3,7 @@ MAPIP Routing microservice — внешнее API в духе картограф
 геокодирование и построение маршрутов (OpenRouteService), без привязки к UI.
 """
 from typing import Any
+import re
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Query
@@ -122,15 +123,91 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     else:
         r = await _post_ors(profile, {"coordinates": coordinates})
 
-    if (
-        not r.is_success
-        and profile == "wheelchair"
-        and '"code":2007' in r.text
-    ):
-        # ORS периодически отдает 2007 для geojson на wheelchair; fallback на foot-walking.
-        r = await _post_ors("foot-walking", {"coordinates": coordinates})
+    if not r.is_success and re.search(r"2007", r.text or ""):
+        # У ORS иногда code 2007; пробуем совместимые профили.
+        for fallback_profile in ("foot-walking", "driving-car"):
+            if fallback_profile == profile:
+                continue
+            r = await _post_ors(fallback_profile, {"coordinates": coordinates})
+            if r.is_success:
+                break
 
     if not r.is_success:
         raise HTTPException(status_code=r.status_code, detail=r.text[:2000])
 
     return r.json()
+
+
+@app.get("/v1/overpass/objects")
+async def overpass_objects(
+    bbox: str = Query(..., description="minLon,minLat,maxLon,maxLat"),
+    profile: str = Query("foot-walking"),
+) -> dict[str, Any]:
+    try:
+        min_lon, min_lat, max_lon, max_lat = [float(x) for x in bbox.split(",")]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="bbox: ожидается minLon,minLat,maxLon,maxLat") from e
+
+    # Простые профили выборки: для колясочников добавляем барьеры/пандусы,
+    # для пешехода — общественно полезные POI.
+    if profile == "wheelchair":
+        clauses = """
+          node["highway"="steps"]({min_lat},{min_lon},{max_lat},{max_lon});
+          way["highway"="steps"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
+          way["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["kerb"]({min_lat},{min_lon},{max_lat},{max_lon});
+        """
+    else:
+        clauses = """
+          node["amenity"="drinking_water"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["tourism"="museum"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["tourism"="hotel"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["amenity"="toilets"]({min_lat},{min_lon},{max_lat},{max_lon});
+        """
+
+    query = f"""
+    [out:json][timeout:25];
+    (
+      {clauses}
+    );
+    out center tags;
+    """.format(min_lat=min_lat, min_lon=min_lon, max_lat=max_lat, max_lon=max_lon)
+
+    async with httpx.AsyncClient(timeout=40.0) as client:
+        r = await client.post(
+            "https://overpass-api.de/api/interpreter",
+            data={"data": query},
+            headers={"User-Agent": settings.nominatim_user_agent},
+        )
+    if not r.is_success:
+        raise HTTPException(status_code=502, detail="Overpass API error")
+    data = r.json()
+    features: list[dict[str, Any]] = []
+    for el in data.get("elements", []):
+        lat = el.get("lat")
+        lon = el.get("lon")
+        if lat is None or lon is None:
+            center = el.get("center") or {}
+            lat = center.get("lat")
+            lon = center.get("lon")
+        if lat is None or lon is None:
+            continue
+        tags = el.get("tags", {})
+        label = (
+            tags.get("name")
+            or tags.get("amenity")
+            or tags.get("tourism")
+            or tags.get("highway")
+            or tags.get("wheelchair")
+            or "OSM object"
+        )
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [float(lon), float(lat)]},
+                "properties": {"id": el.get("id"), "label": label, "tags": tags},
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}
