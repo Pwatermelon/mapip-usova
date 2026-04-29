@@ -75,7 +75,7 @@ function bboxFromLngLats(coords: number[][]): [[number, number], [number, number
 }
 
 function hasOrs2007(text: string): boolean {
-  return /"code"\s*:\s*2007|response format is not supported/i.test(text);
+  return /2007|response format is not supported/i.test(text);
 }
 
 export function RouteMapWidget() {
@@ -85,12 +85,14 @@ export function RouteMapWidget() {
   const toMarkerRef = useRef<maplibregl.Marker | null>(null);
   const meMarkerRef = useRef<maplibregl.Marker | null>(null);
   const geoWatchIdRef = useRef<number | null>(null);
+  const fromSuggestReqRef = useRef(0);
+  const toSuggestReqRef = useRef(0);
   const fromPointRef = useRef<[number, number] | null>(null);
   const toPointRef = useRef<[number, number] | null>(null);
   const [fromQ, setFromQ] = useState("");
   const [toQ, setToQ] = useState("");
   const [profile, setProfile] = useState("foot-walking");
-  const [alternativeCount, setAlternativeCount] = useState(3);
+  const [alternativeCount, setAlternativeCount] = useState(1);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [objects, setObjects] = useState<MapObject[]>([]);
@@ -364,27 +366,28 @@ export function RouteMapWidget() {
       .filter((o) => o.display_name.toLowerCase().includes(term.toLowerCase()))
       .slice(0, 5)
       .map((o) => ({ lat: o.x, lon: o.y, display_name: o.display_name }));
+    const reqId = target === "from" ? ++fromSuggestReqRef.current : ++toSuggestReqRef.current;
     try {
       const hits = await fetchJson<{ lat: number; lon: number; display_name: string }[]>(
         `${routingBase}/v1/geocode/search?q=${encodeURIComponent(term)}&limit=5`,
       );
+      if (target === "from" && reqId !== fromSuggestReqRef.current) return;
+      if (target === "to" && reqId !== toSuggestReqRef.current) return;
       const merged = [...local, ...hits].filter(
         (item, idx, arr) => arr.findIndex((x) => x.display_name === item.display_name) === idx,
       );
       if (target === "from") {
         setFromSuggestions(merged);
-        setToSuggestions([]);
       } else {
         setToSuggestions(merged);
-        setFromSuggestions([]);
       }
     } catch {
+      if (target === "from" && reqId !== fromSuggestReqRef.current) return;
+      if (target === "to" && reqId !== toSuggestReqRef.current) return;
       if (target === "from") {
         setFromSuggestions(local);
-        setToSuggestions([]);
       } else {
         setToSuggestions(local);
-        setFromSuggestions([]);
       }
     }
   };
@@ -407,23 +410,27 @@ export function RouteMapWidget() {
       const fallbackProfiles = [profile, "foot-walking", "driving-car"].filter(
         (p, idx, arr) => arr.indexOf(p) === idx,
       );
+      const altCandidates = alternativeCount > 1 ? [alternativeCount, 1] : [1];
       let requestProfile = fallbackProfiles[0];
       let res: Response | null = null;
       let text = "";
-      for (const candidate of fallbackProfiles) {
-        requestProfile = candidate;
-        res = await fetch(`${routingBase}/v1/directions/geojson`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            from: fromCoord,
-            to: toCoord,
-            profile: candidate,
-            alternativeCount,
-          }),
-        });
-        text = await res.text();
-        if (res.ok && !hasOrs2007(text)) break;
+      for (const alt of altCandidates) {
+        for (const candidate of fallbackProfiles) {
+          requestProfile = candidate;
+          res = await fetch(`${routingBase}/v1/directions/geojson`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              from: fromCoord,
+              to: toCoord,
+              profile: candidate,
+              alternativeCount: alt,
+            }),
+          });
+          text = await res.text();
+          if (res.ok && !hasOrs2007(text)) break;
+        }
+        if (res?.ok && !hasOrs2007(text)) break;
       }
       if (!res) {
         setErr("Не удалось получить ответ сервиса маршрутов.");
@@ -575,6 +582,9 @@ export function RouteMapWidget() {
             checked={useMyLocationRouting}
             onChange={(e) => {
               setUseMyLocationRouting(e.target.checked);
+              if (e.target.checked && !window.isSecureContext) {
+                setErr("Геолокация работает только в защищенном контексте (https/localhost).");
+              }
               if (e.target.checked && myPoint) {
                 setFromPoint(myPoint);
                 setFromQ(`${myPoint[0].toFixed(6)}, ${myPoint[1].toFixed(6)}`);
