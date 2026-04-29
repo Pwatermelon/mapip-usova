@@ -75,6 +75,12 @@ async def _post_ors(profile: str, payload: dict[str, Any]) -> httpx.Response:
         return await client.post(url, params=params, headers=headers, json=payload)
 
 
+def _has_ors_2007(text: str | None) -> bool:
+    if not text:
+        return False
+    return bool(re.search(r'"code"\s*:\s*2007|response format is not supported', text, re.IGNORECASE))
+
+
 @app.post("/v1/directions/geojson")
 async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     """
@@ -123,16 +129,16 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     else:
         r = await _post_ors(profile, {"coordinates": coordinates})
 
-    if not r.is_success and re.search(r"2007", r.text or ""):
+    if _has_ors_2007(r.text):
         # У ORS иногда code 2007; пробуем совместимые профили.
         for fallback_profile in ("foot-walking", "driving-car"):
             if fallback_profile == profile:
                 continue
             r = await _post_ors(fallback_profile, {"coordinates": coordinates})
-            if r.is_success:
+            if r.is_success and not _has_ors_2007(r.text):
                 break
 
-    if not r.is_success:
+    if not r.is_success or _has_ors_2007(r.text):
         raise HTTPException(status_code=r.status_code, detail=r.text[:2000])
 
     return r.json()

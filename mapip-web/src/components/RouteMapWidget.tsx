@@ -26,6 +26,36 @@ function lineCoordsFromOrs(data: OrsGeoJson): number[][] {
   return out;
 }
 
+function routeFeaturesFromOrs(data: OrsGeoJson): GeoJSON.Feature<GeoJSON.LineString>[] {
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+  for (const f of data.features ?? []) {
+    const g = f.geometry;
+    if (!g) continue;
+    if (g.type === "LineString") {
+      features.push({
+        type: "Feature",
+        geometry: g as GeoJSON.LineString,
+        properties: f.properties ?? {},
+      });
+      continue;
+    }
+    if (g.type === "MultiLineString") {
+      const multi = g.coordinates as number[][][];
+      for (const line of multi) {
+        features.push({
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: line },
+          properties: f.properties ?? {},
+        });
+      }
+    }
+  }
+  return features.map((feature, idx) => ({
+    ...feature,
+    properties: { ...(feature.properties ?? {}), routeIndex: idx },
+  }));
+}
+
 function bboxFromLngLats(coords: number[][]): [[number, number], [number, number]] | null {
   if (!coords.length) return null;
   let minLon = coords[0][1];
@@ -44,6 +74,10 @@ function bboxFromLngLats(coords: number[][]): [[number, number], [number, number
   ];
 }
 
+function hasOrs2007(text: string): boolean {
+  return /"code"\s*:\s*2007|response format is not supported/i.test(text);
+}
+
 export function RouteMapWidget() {
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -54,6 +88,7 @@ export function RouteMapWidget() {
   const [fromQ, setFromQ] = useState("");
   const [toQ, setToQ] = useState("");
   const [profile, setProfile] = useState("foot-walking");
+  const [alternativeCount, setAlternativeCount] = useState(3);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [objects, setObjects] = useState<MapObject[]>([]);
@@ -112,7 +147,37 @@ export function RouteMapWidget() {
         type: "line",
         source: "route",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#22c55e", "line-width": 5, "line-opacity": 0.9 },
+        paint: {
+          "line-color": [
+            "match",
+            ["coalesce", ["get", "routeIndex"], 0],
+            0,
+            "#22c55e",
+            1,
+            "#16a34a",
+            2,
+            "#15803d",
+            "#22c55e",
+          ],
+          "line-width": ["match", ["coalesce", ["get", "routeIndex"], 0], 0, 6, 1, 5, 2, 4, 4],
+          "line-opacity": ["match", ["coalesce", ["get", "routeIndex"], 0], 0, 0.95, 1, 0.7, 2, 0.55, 0.5],
+        },
+      });
+      map.addSource("core-objects", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "core-objects-circles",
+        type: "circle",
+        source: "core-objects",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#2563eb",
+          "circle-stroke-width": 1.2,
+          "circle-stroke-color": "#1e3a8a",
+          "circle-opacity": 0.85,
+        },
       });
       map.addSource("overpass-pois", {
         type: "geojson",
@@ -151,6 +216,20 @@ export function RouteMapWidget() {
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getSource("core-objects")) return;
+    const features: GeoJSON.Feature[] = objects.map((obj) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [obj.y, obj.x] },
+      properties: { id: obj.id, name: obj.display_name },
+    }));
+    (map.getSource("core-objects") as maplibregl.GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features,
+    });
+  }, [objects]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -195,6 +274,20 @@ export function RouteMapWidget() {
     const hits = await fetchJson<{ lat: number; lon: number }[]>(`${routingBase}/v1/geocode/search?q=${enc}&limit=1`);
     if (!hits.length) throw new Error("Не удалось найти одну из точек.");
     return [hits[0].lat, hits[0].lon] as [number, number];
+  };
+
+  const resolveAndSetPoint = async (target: "from" | "to") => {
+    try {
+      if (target === "from") {
+        const point = await resolvePoint(fromQ, fromPoint);
+        setFromPoint(point);
+      } else {
+        const point = await resolvePoint(toQ, toPoint);
+        setToPoint(point);
+      }
+    } catch {
+      // Silent on blur/focusout: explicit errors are shown on route build.
+    }
   };
 
   const loadSuggestions = async (q: string, target: "from" | "to") => {
@@ -252,11 +345,11 @@ export function RouteMapWidget() {
           from: fromCoord,
           to: toCoord,
           profile,
-          alternativeCount: 1,
+          alternativeCount,
         }),
       });
       let text = await res.text();
-      if (!res.ok && /2007/.test(text)) {
+      if (hasOrs2007(text)) {
         requestProfile = "foot-walking";
         res = await fetch(`${routingBase}/v1/directions/geojson`, {
           method: "POST",
@@ -265,7 +358,7 @@ export function RouteMapWidget() {
             from: fromCoord,
             to: toCoord,
             profile: requestProfile,
-            alternativeCount: 1,
+            alternativeCount,
           }),
         });
         text = await res.text();
@@ -281,24 +374,26 @@ export function RouteMapWidget() {
         setErr("Сервис маршрутов вернул не JSON (проверьте прокси /routing и ключ OPENROUTE_API_KEY).");
         return;
       }
+      const routeFeatures = routeFeaturesFromOrs(data);
       const coords = lineCoordsFromOrs(data);
       const routeColor =
         requestProfile === "wheelchair" ? "#7c3aed" : requestProfile === "driving-car" ? "#ef4444" : "#22c55e";
       if (map?.getLayer("route-line")) {
-        map.setPaintProperty("route-line", "line-color", routeColor);
+        map.setPaintProperty("route-line", "line-color", [
+          "match",
+          ["coalesce", ["get", "routeIndex"], 0],
+          0,
+          routeColor,
+          1,
+          requestProfile === "wheelchair" ? "#8b5cf6" : requestProfile === "driving-car" ? "#f97316" : "#16a34a",
+          2,
+          requestProfile === "wheelchair" ? "#a78bfa" : requestProfile === "driving-car" ? "#fb923c" : "#15803d",
+          routeColor,
+        ]);
       }
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
-        features:
-          coords.length >= 2
-            ? [
-                {
-                  type: "Feature",
-                  geometry: { type: "LineString", coordinates: coords.map(([lat, lon]) => [lon, lat]) },
-                  properties: {},
-                },
-              ]
-            : [],
+        features: routeFeatures,
       };
       if (map?.getSource("route")) {
         (map.getSource("route") as maplibregl.GeoJSONSource).setData(fc);
@@ -325,7 +420,7 @@ export function RouteMapWidget() {
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
       setMsg(
-        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. На карте также показаны объекты из Overpass/OSM + ${objects.length} объектов из core API.`,
+        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${routeFeatures.length}. На карте также показаны объекты из Overpass/OSM + ${objects.length} объектов из core API.`,
       );
     } catch (e) {
       setErr(String(e));
@@ -346,8 +441,10 @@ export function RouteMapWidget() {
             value={fromQ}
             onChange={(e) => {
               setFromQ(e.target.value);
+              setFromPoint(null);
               void loadSuggestions(e.target.value, "from");
             }}
+            onBlur={() => void resolveAndSetPoint("from")}
             placeholder="Адрес или место"
           />
           {fromSuggestions.length > 0 && (
@@ -376,8 +473,10 @@ export function RouteMapWidget() {
             value={toQ}
             onChange={(e) => {
               setToQ(e.target.value);
+              setToPoint(null);
               void loadSuggestions(e.target.value, "to");
             }}
+            onBlur={() => void resolveAndSetPoint("to")}
             placeholder="Адрес или место"
           />
           {toSuggestions.length > 0 && (
@@ -407,6 +506,14 @@ export function RouteMapWidget() {
             <option value="wheelchair">Колясочник (wheelchair)</option>
             <option value="foot-walking">Пешеход</option>
             <option value="driving-car">Авто</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Вариантов маршрута</label>
+          <select value={alternativeCount} onChange={(e) => setAlternativeCount(Number(e.target.value) || 1)}>
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
           </select>
         </div>
         <button type="button" className="btn" onClick={() => void build()}>
