@@ -83,6 +83,7 @@ export function RouteMapWidget() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const fromMarkerRef = useRef<maplibregl.Marker | null>(null);
   const toMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const meMarkerRef = useRef<maplibregl.Marker | null>(null);
   const fromPointRef = useRef<[number, number] | null>(null);
   const toPointRef = useRef<[number, number] | null>(null);
   const [fromQ, setFromQ] = useState("");
@@ -96,6 +97,8 @@ export function RouteMapWidget() {
   const [toSuggestions, setToSuggestions] = useState<{ lat: number; lon: number; display_name: string }[]>([]);
   const [fromPoint, setFromPoint] = useState<[number, number] | null>(null);
   const [toPoint, setToPoint] = useState<[number, number] | null>(null);
+  const [myPoint, setMyPoint] = useState<[number, number] | null>(null);
+  const [useMyLocationRouting, setUseMyLocationRouting] = useState(true);
 
   useEffect(() => {
     fromPointRef.current = fromPoint;
@@ -212,6 +215,7 @@ export function RouteMapWidget() {
     return () => {
       fromMarkerRef.current?.remove();
       toMarkerRef.current?.remove();
+      meMarkerRef.current?.remove();
       map.remove();
       mapRef.current = null;
     };
@@ -255,6 +259,45 @@ export function RouteMapWidget() {
       .setPopup(new maplibregl.Popup({ offset: 18 }).setText("Финиш"))
       .addTo(map);
   }, [toPoint]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!myPoint) {
+      meMarkerRef.current?.remove();
+      meMarkerRef.current = null;
+      return;
+    }
+    meMarkerRef.current?.remove();
+    meMarkerRef.current = new maplibregl.Marker({ color: "#0ea5e9" })
+      .setLngLat([myPoint[1], myPoint[0]])
+      .setPopup(new maplibregl.Popup({ offset: 18 }).setText("Моё местоположение"))
+      .addTo(map);
+  }, [myPoint]);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setErr("Геолокация не поддерживается браузером.");
+      return;
+    }
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        setMyPoint(point);
+      },
+      () => {
+        setErr("Нет доступа к геолокации. Разрешите доступ к местоположению в браузере.");
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 3000 },
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
+
+  useEffect(() => {
+    if (!useMyLocationRouting || !myPoint) return;
+    setFromPoint(myPoint);
+    setFromQ(`${myPoint[0].toFixed(6)}, ${myPoint[1].toFixed(6)}`);
+  }, [myPoint, useMyLocationRouting]);
 
   const parseLatLon = (value: string): [number, number] | null => {
     const m = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)$/);
@@ -330,40 +373,43 @@ export function RouteMapWidget() {
     setErr(null);
     setMsg(null);
     const map = mapRef.current;
-    if (!fromQ.trim() || !toQ.trim()) {
+    if ((!fromQ.trim() && !useMyLocationRouting) || !toQ.trim()) {
       setErr("Укажите «Откуда» и «Куда».");
       return;
     }
     try {
-      const fromCoord = await resolvePoint(fromQ, fromPoint);
+      const fromCoord = useMyLocationRouting ? myPoint : await resolvePoint(fromQ, fromPoint);
+      if (!fromCoord) {
+        setErr("Текущее местоположение еще не определено.");
+        return;
+      }
       const toCoord = await resolvePoint(toQ, toPoint);
-      let requestProfile = profile;
-      let res = await fetch(`${routingBase}/v1/directions/geojson`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from: fromCoord,
-          to: toCoord,
-          profile,
-          alternativeCount,
-        }),
-      });
-      let text = await res.text();
-      if (hasOrs2007(text)) {
-        requestProfile = "foot-walking";
+      const fallbackProfiles = [profile, "foot-walking", "driving-car"].filter(
+        (p, idx, arr) => arr.indexOf(p) === idx,
+      );
+      let requestProfile = fallbackProfiles[0];
+      let res: Response | null = null;
+      let text = "";
+      for (const candidate of fallbackProfiles) {
+        requestProfile = candidate;
         res = await fetch(`${routingBase}/v1/directions/geojson`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             from: fromCoord,
             to: toCoord,
-            profile: requestProfile,
+            profile: candidate,
             alternativeCount,
           }),
         });
         text = await res.text();
+        if (res.ok && !hasOrs2007(text)) break;
       }
-      if (!res.ok) {
+      if (!res) {
+        setErr("Не удалось получить ответ сервиса маршрутов.");
+        return;
+      }
+      if (!res.ok || hasOrs2007(text)) {
         setErr(errorTextFromResponse(res, text));
         return;
       }
@@ -439,13 +485,14 @@ export function RouteMapWidget() {
           <label>Откуда</label>
           <input
             value={fromQ}
+            disabled={useMyLocationRouting}
             onChange={(e) => {
               setFromQ(e.target.value);
               setFromPoint(null);
               void loadSuggestions(e.target.value, "from");
             }}
             onBlur={() => void resolveAndSetPoint("from")}
-            placeholder="Адрес или место"
+            placeholder={useMyLocationRouting ? "Текущее местоположение (live)" : "Адрес или место"}
           />
           {fromSuggestions.length > 0 && (
             <div className="search-results">
@@ -453,6 +500,7 @@ export function RouteMapWidget() {
                 <div
                   key={`from-${i}-${s.lat}-${s.lon}`}
                   className="search-hit"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     setFromQ(s.display_name);
                     setFromPoint([s.lat, s.lon]);
@@ -485,6 +533,7 @@ export function RouteMapWidget() {
                 <div
                   key={`to-${i}-${s.lat}-${s.lon}`}
                   className="search-hit"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     setToQ(s.display_name);
                     setToPoint([s.lat, s.lon]);
@@ -500,6 +549,21 @@ export function RouteMapWidget() {
           )}
         </div>
         <p className="muted small">Можно кликнуть по карте: первый клик — старт, второй — финиш.</p>
+        <label className="muted small" style={{ display: "block", marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={useMyLocationRouting}
+            onChange={(e) => {
+              setUseMyLocationRouting(e.target.checked);
+              if (e.target.checked && myPoint) {
+                setFromPoint(myPoint);
+                setFromQ(`${myPoint[0].toFixed(6)}, ${myPoint[1].toFixed(6)}`);
+              }
+            }}
+            style={{ marginRight: 8 }}
+          />
+          Строить маршрут от моего местоположения (в реальном времени)
+        </label>
         <div className="field">
           <label>Профиль ORS</label>
           <select value={profile} onChange={(e) => setProfile(e.target.value)}>
