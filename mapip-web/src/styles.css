@@ -157,7 +157,12 @@ a {
 @media (max-width: 900px) {
   .map-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(280px, 1fr);
+    grid-template-rows: minmax(42vh, 56vh) auto;
+  }
+
+  .map-wrap {
+    order: -1;
+    min-height: 42vh;
   }
 }
 
@@ -173,7 +178,7 @@ a {
   .side-panel {
     border-right: none;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    max-height: 45vh;
+    max-height: none;
   }
 }
 

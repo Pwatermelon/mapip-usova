@@ -81,6 +81,44 @@ def _has_ors_2007(text: str | None) -> bool:
     return bool(re.search(r'"code"\s*:\s*2007|response format is not supported', text, re.IGNORECASE))
 
 
+async def _post_ors_json_geo(profile: str, payload: dict[str, Any]) -> httpx.Response:
+    # Fallback на json endpoint ORS с явным geojson-форматом геометрии.
+    url = f"https://api.openrouteservice.org/v2/directions/{profile}"
+    params = {"api_key": settings.openroute_api_key}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    body = {
+        **payload,
+        "instructions": False,
+        "elevation": False,
+        "geometry_simplify": False,
+        "geometry_format": "geojson",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        return await client.post(url, params=params, headers=headers, json=body)
+
+
+def _json_route_to_geojson(payload: dict[str, Any]) -> dict[str, Any]:
+    routes = payload.get("routes") or []
+    features: list[dict[str, Any]] = []
+    for idx, route in enumerate(routes):
+        geom = route.get("geometry")
+        if not geom or geom.get("type") != "LineString":
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": geom,
+                "properties": {
+                    "summary": route.get("summary", {}),
+                    "segments": route.get("segments", []),
+                    "way_points": route.get("way_points", []),
+                    "routeIndex": idx,
+                },
+            }
+        )
+    return {"type": "FeatureCollection", "features": features}
+
+
 @app.post("/v1/directions/geojson")
 async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     """
@@ -139,7 +177,18 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
                 break
 
     if not r.is_success or _has_ors_2007(r.text):
-        raise HTTPException(status_code=r.status_code, detail=r.text[:2000])
+        # Остаемся строго в ORS: fallback на directions/{profile} + geometry_format=geojson.
+        r_json = await _post_ors_json_geo(profile, {"coordinates": coordinates})
+        if _has_ors_2007(r_json.text) or not r_json.is_success:
+            for fallback_profile in ("foot-walking", "driving-car"):
+                if fallback_profile == profile:
+                    continue
+                r_json = await _post_ors_json_geo(fallback_profile, {"coordinates": coordinates})
+                if r_json.is_success and not _has_ors_2007(r_json.text):
+                    break
+        if not r_json.is_success or _has_ors_2007(r_json.text):
+            raise HTTPException(status_code=r_json.status_code, detail=r_json.text[:2000])
+        return _json_route_to_geojson(r_json.json())
 
     return r.json()
 
