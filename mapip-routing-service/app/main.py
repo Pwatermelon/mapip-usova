@@ -82,7 +82,7 @@ def _has_ors_2007(text: str | None) -> bool:
 
 
 async def _post_ors_json_geo(profile: str, payload: dict[str, Any]) -> httpx.Response:
-    # Fallback на json endpoint ORS с явным geojson-форматом геометрии.
+    # Fallback на json endpoint ORS.
     url = f"https://api.openrouteservice.org/v2/directions/{profile}"
     params = {"api_key": settings.openroute_api_key}
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -91,10 +91,44 @@ async def _post_ors_json_geo(profile: str, payload: dict[str, Any]) -> httpx.Res
         "instructions": False,
         "elevation": False,
         "geometry_simplify": False,
-        "geometry_format": "geojson",
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         return await client.post(url, params=params, headers=headers, json=body)
+
+
+def _decode_polyline(encoded: str, precision: int = 5) -> list[list[float]]:
+    coords: list[list[float]] = []
+    index = 0
+    lat = 0
+    lon = 0
+    factor = 10**precision
+
+    while index < len(encoded):
+        result = 0
+        shift = 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlat = ~(result >> 1) if result & 1 else result >> 1
+        lat += dlat
+
+        result = 0
+        shift = 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlon = ~(result >> 1) if result & 1 else result >> 1
+        lon += dlon
+        coords.append([lon / factor, lat / factor])
+    return coords
 
 
 def _json_route_to_geojson(payload: dict[str, Any]) -> dict[str, Any]:
@@ -102,12 +136,19 @@ def _json_route_to_geojson(payload: dict[str, Any]) -> dict[str, Any]:
     features: list[dict[str, Any]] = []
     for idx, route in enumerate(routes):
         geom = route.get("geometry")
-        if not geom or geom.get("type") != "LineString":
+        if not geom:
+            continue
+        geometry: dict[str, Any]
+        if isinstance(geom, dict) and geom.get("type") == "LineString":
+            geometry = geom
+        elif isinstance(geom, str):
+            geometry = {"type": "LineString", "coordinates": _decode_polyline(geom)}
+        else:
             continue
         features.append(
             {
                 "type": "Feature",
-                "geometry": geom,
+                "geometry": geometry,
                 "properties": {
                     "summary": route.get("summary", {}),
                     "segments": route.get("segments", []),
