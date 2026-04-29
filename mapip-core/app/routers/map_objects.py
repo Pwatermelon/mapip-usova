@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import get_db
 from app.models import MapObject
@@ -13,8 +14,12 @@ router = APIRouter(tags=["map-objects"])
 
 @router.get("/GetSocialMapObject")
 def get_social_map_objects(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    rows = db.query(MapObject).all()
-    return [map_object_to_json(m) for m in rows]
+    try:
+        rows = db.query(MapObject).all()
+        return [map_object_to_json(m) for m in rows]
+    except SQLAlchemyError:
+        # Не валим фронт 500-кой, чтобы UI мог показать fallback объекты.
+        return []
 
 
 @router.get("/api/SocialMapObject/GetSocialMapObjectById/{obj_id}")
@@ -29,13 +34,16 @@ def get_by_id(obj_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 @router.get("/api/SocialMapObject/SearchBy/")
 def search_by(search: str | None = None, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    q = db.query(MapObject)
-    if search and search.strip():
-        s = f"%{search.strip().lower()}%"
-        q = q.filter(
-            or_(
-                func.lower(MapObject.Display_name).like(s),
-                func.lower(MapObject.Adress).like(s),
+    try:
+        q = db.query(MapObject)
+        if search and search.strip():
+            s = f"%{search.strip().lower()}%"
+            q = q.filter(
+                or_(
+                    func.lower(MapObject.Display_name).like(s),
+                    func.lower(MapObject.Adress).like(s),
+                )
             )
-        )
-    return [map_object_to_json(m) for m in q.all()]
+        return [map_object_to_json(m) for m in q.all()]
+    except SQLAlchemyError:
+        return []

@@ -43,7 +43,14 @@ async def geocode_search(
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(url, params=params, headers=headers)
     if not r.is_success:
-        raise HTTPException(status_code=502, detail="Nominatim error")
+        # Fallback на локальные базовые подсказки, чтобы фронт не оставался без вариантов.
+        ql = q.strip().lower()
+        fallback = [
+            {"lat": 51.533557, "lon": 46.034257, "display_name": "Саратов, центр", "place_id": "fallback-1"},
+            {"lat": 51.530249, "lon": 46.036759, "display_name": "ул. Тархова, Саратов", "place_id": "fallback-2"},
+            {"lat": 51.529300, "lon": 46.020100, "display_name": "Городской парк, Саратов", "place_id": "fallback-3"},
+        ]
+        return [row for row in fallback if ql in row["display_name"].lower()][:limit]
     data = r.json()
     out: list[dict[str, Any]] = []
     for row in data:
