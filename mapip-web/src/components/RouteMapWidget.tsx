@@ -66,6 +66,15 @@ function sqDist(aLat: number, aLon: number, bLat: number, bLon: number): number 
   return dLat * dLat + dLon * dLon;
 }
 
+function minSqDistToRoute(route: [number, number][], lat: number, lon: number): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (const [rLat, rLon] of route) {
+    const d = sqDist(rLat, rLon, lat, lon);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 function infraScoreForRoute(
   feature: GeoJSON.Feature<GeoJSON.LineString>,
   coreObjects: MapObject[],
@@ -492,19 +501,17 @@ export function RouteMapWidget() {
       }
       const routeFeaturesRaw = routeFeaturesFromOrs(data);
       const coords = lineCoordsFromOrs(data);
-      const routeColor =
-        requestProfile === "wheelchair" ? "#7c3aed" : requestProfile === "driving-car" ? "#ef4444" : "#22c55e";
       if (map?.getLayer("route-line")) {
         map.setPaintProperty("route-line", "line-color", [
           "match",
           ["coalesce", ["get", "routeIndex"], 0],
           0,
-          routeColor,
+          "#22c55e",
           1,
-          requestProfile === "wheelchair" ? "#8b5cf6" : requestProfile === "driving-car" ? "#f97316" : "#16a34a",
+          "#eab308",
           2,
-          requestProfile === "wheelchair" ? "#a78bfa" : requestProfile === "driving-car" ? "#fb923c" : "#15803d",
-          routeColor,
+          "#ef4444",
+          "#94a3b8",
         ]);
       }
       const bb = bboxFromLngLats(coords.map(([lat, lon]) => [lat, lon]));
@@ -526,10 +533,78 @@ export function RouteMapWidget() {
           });
         }
       }
-      const ranked = [...routeFeaturesRaw]
+      const mainRoute = routeFeaturesRaw[0] ?? null;
+      const mainRouteLatLon = mainRoute ? routeLatLonCoords(mainRoute) : [];
+      const coreCandidates = objects.map((obj) => ({
+        lat: obj.x,
+        lon: obj.y,
+        source: "core" as const,
+        distance: mainRouteLatLon.length ? minSqDistToRoute(mainRouteLatLon, obj.x, obj.y) : Number.POSITIVE_INFINITY,
+      }));
+      const overpassCandidates = overpassFeatures
+        .map((poi) => {
+          const coords = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
+          if (!coords || coords.length < 2) return null;
+          const lat = coords[1];
+          const lon = coords[0];
+          return {
+            lat,
+            lon,
+            source: "overpass" as const,
+            distance: mainRouteLatLon.length ? minSqDistToRoute(mainRouteLatLon, lat, lon) : Number.POSITIVE_INFINITY,
+          };
+        })
+        .filter((x): x is { lat: number; lon: number; source: "overpass"; distance: number } => Boolean(x));
+      const viaCandidates = [...coreCandidates, ...overpassCandidates]
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 18);
+
+      const extraFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+      for (const candidate of viaCandidates) {
+        if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
+        const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from: fromCoord,
+            to: toCoord,
+            profile: requestProfile,
+            via: [[candidate.lat, candidate.lon]],
+          }),
+        });
+        const viaText = await viaRes.text();
+        if (!viaRes.ok || hasOrs2007(viaText)) continue;
+        let viaData: OrsGeoJson;
+        try {
+          viaData = JSON.parse(viaText) as OrsGeoJson;
+        } catch {
+          continue;
+        }
+        const viaFeatures = routeFeaturesFromOrs(viaData);
+        const first = viaFeatures[0];
+        if (!first) continue;
+        const firstCoords = first.geometry.coordinates ?? [];
+        const duplicate = [...routeFeaturesRaw, ...extraFeatures].some((rf) => {
+          const c = rf.geometry.coordinates ?? [];
+          if (c.length !== firstCoords.length) return false;
+          if (!c.length) return true;
+          const a = c[Math.floor(c.length / 2)];
+          const b = firstCoords[Math.floor(firstCoords.length / 2)];
+          return Math.abs(a[0] - b[0]) < 0.00015 && Math.abs(a[1] - b[1]) < 0.00015;
+        });
+        if (duplicate) continue;
+        extraFeatures.push(first);
+      }
+
+      const allRouteFeatures = [...routeFeaturesRaw, ...extraFeatures].slice(0, alternativeCount);
+      const ranked = [...allRouteFeatures]
         .map((f) => ({ feature: f, score: infraScoreForRoute(f, objects, overpassFeatures, requestProfile) }))
         .sort((a, b) => b.score - a.score)
-        .map((row, idx) => ({ ...row.feature, properties: { ...(row.feature.properties ?? {}), routeIndex: idx, infraScore: row.score } }));
+        .map((row, idx) => ({ ...row.feature, properties: { ...(row.feature.properties ?? {}), routeIndex: idx, infraScore: row.score } }))
+        .map((f, idx) => ({
+        ...f,
+        properties: { ...(f.properties ?? {}), routeIndex: idx },
+      }));
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
         features: ranked,
@@ -542,9 +617,7 @@ export function RouteMapWidget() {
       const summary = (feat?.properties as { summary?: { distance?: number; duration?: number } })?.summary;
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
-      setMsg(
-        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}. Приоритет: инфраструктура доступности (core + overpass), а не длина.`,
-      );
+      setMsg(`Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.`);
     } catch (e) {
       setErr(String(e));
     }

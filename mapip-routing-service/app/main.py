@@ -74,6 +74,17 @@ def _parse_lat_lon_pair(value: Any, field: str) -> list[float]:
         raise HTTPException(status_code=400, detail=f"{field}: неверные координаты") from e
 
 
+def _parse_via_points(value: Any) -> list[list[float]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise HTTPException(status_code=400, detail="via: ожидается список точек [lat, lon]")
+    out: list[list[float]] = []
+    for idx, point in enumerate(value):
+        out.append(_parse_lat_lon_pair(point, f"via[{idx}]"))
+    return out
+
+
 async def _post_ors(profile: str, payload: dict[str, Any]) -> httpx.Response:
     url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
     params = {"api_key": settings.openroute_api_key}
@@ -165,6 +176,51 @@ def _merge_geojson_features(collections: list[dict[str, Any]]) -> dict[str, Any]
             f_props["routeIndex"] = len(features)
             features.append({**f, "properties": f_props})
     return {"type": "FeatureCollection", "features": features}
+
+
+def _extract_first_line_coords(geo: dict[str, Any]) -> list[list[float]]:
+    for f in geo.get("features", []):
+        geom = f.get("geometry") or {}
+        if geom.get("type") == "LineString":
+            coords = geom.get("coordinates") or []
+            if isinstance(coords, list):
+                return coords
+    return []
+
+
+async def _build_offset_alternatives(
+    profile: str,
+    start: list[float],
+    end: list[float],
+    base_geo: dict[str, Any],
+    need_count: int,
+) -> list[dict[str, Any]]:
+    if need_count <= 0:
+        return []
+    out: list[dict[str, Any]] = []
+    base_line = _extract_first_line_coords(base_geo)
+    if len(base_line) < 4:
+        return out
+    samples = [base_line[len(base_line) // 3], base_line[(len(base_line) * 2) // 3]]
+    offsets = [0.004, -0.004, 0.007, -0.007]
+    for sample in samples:
+        if len(out) >= need_count:
+            break
+        sx, sy = float(sample[0]), float(sample[1])
+        for delta in offsets:
+            if len(out) >= need_count:
+                break
+            via = [sx + delta, sy - delta]
+            r_via = await _post_ors_points(profile, [start, via, end])
+            if not r_via.is_success or _has_ors_2007(r_via.text):
+                continue
+            try:
+                via_geo = r_via.json()
+            except Exception:
+                continue
+            if via_geo.get("features"):
+                out.append(via_geo)
+    return out
 
 
 async def _post_ors_json_geo(profile: str, payload: dict[str, Any]) -> httpx.Response:
@@ -264,6 +320,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     raw_to = body.get("to")
     from_ = _parse_lat_lon_pair(raw_from, "from")
     to = _parse_lat_lon_pair(raw_to, "to")
+    via_points = _parse_via_points(body.get("via"))
 
     profile = (body.get("profile") or "foot-walking")
     if isinstance(profile, str):
@@ -273,13 +330,16 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
     if profile not in ("wheelchair", "foot-walking", "driving-car"):
         profile = "foot-walking"
 
-    coordinates = [[from_[1], from_[0]], [to[1], to[0]]]
+    coordinates = [[from_[1], from_[0]], *[[v[1], v[0]] for v in via_points], [to[1], to[0]]]
     alt_raw = body.get("alternativeCount", body.get("alternative_count", 1))
     try:
         alt = int(alt_raw) if alt_raw is not None else 1
     except (TypeError, ValueError):
         alt = 1
     alt = max(1, min(3, alt))
+    if via_points:
+        # Для маршрута через конкретные объекты строим один детерминированный путь.
+        alt = 1
 
     if alt > 1:
         payload: dict[str, Any] = {
@@ -353,7 +413,16 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
                 continue
             if via_geo.get("features"):
                 routes.append(via_geo)
-        return _merge_geojson_features(routes)
+        if len(routes) < alt:
+            extras = await _build_offset_alternatives(
+                profile=profile,
+                start=coordinates[0],
+                end=coordinates[1],
+                base_geo=main_geo,
+                need_count=alt - len(routes),
+            )
+            routes.extend(extras)
+        return _merge_geojson_features(routes[:alt])
 
     base_geo = r.json()
     if alt <= 1:
@@ -384,7 +453,16 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             continue
         if via_geo.get("features"):
             routes.append(via_geo)
-    return _merge_geojson_features(routes)
+    if len(routes) < alt:
+        extras = await _build_offset_alternatives(
+            profile=profile,
+            start=coordinates[0],
+            end=coordinates[1],
+            base_geo=base_geo,
+            need_count=alt - len(routes),
+        )
+        routes.extend(extras)
+    return _merge_geojson_features(routes[:alt])
 
 
 @app.get("/v1/overpass/objects")
