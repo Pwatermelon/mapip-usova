@@ -66,28 +66,52 @@ function sqDist(aLat: number, aLon: number, bLat: number, bLon: number): number 
   return dLat * dLat + dLon * dLon;
 }
 
-function minSqDistToRoute(route: [number, number][], lat: number, lon: number): number {
-  let min = Number.POSITIVE_INFINITY;
-  for (const [rLat, rLon] of route) {
-    const d = sqDist(rLat, rLon, lat, lon);
-    if (d < min) min = d;
-  }
-  return min;
-}
-
-function nearestRouteIndex(route: [number, number][], lat: number, lon: number): number {
-  if (!route.length) return -1;
-  let bestIdx = 0;
-  let best = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < route.length; i += 1) {
-    const [rLat, rLon] = route[i];
-    const d = sqDist(rLat, rLon, lat, lon);
-    if (d < best) {
-      best = d;
-      bestIdx = i;
+/** Ближайшая точка на полилинии маршрута (сегменты), не только вершины — без «заезда» в оффлайн‑POI. */
+function nearestFootOnPolyline(
+  route: [number, number][],
+  lat: number,
+  lon: number,
+): { lat: number; lon: number; distSq: number; progress01: number } | null {
+  if (route.length < 2) return null;
+  let bestSq = Number.POSITIVE_INFINITY;
+  let bestLat = lat;
+  let bestLon = lon;
+  let bestProgress01 = 0;
+  const n = route.length;
+  for (let i = 0; i < n - 1; i++) {
+    const [lat1, lon1] = route[i];
+    const [lat2, lon2] = route[i + 1];
+    const dx = lon2 - lon1;
+    const dy = lat2 - lat1;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-22) continue;
+    const t = Math.max(0, Math.min(1, ((lon - lon1) * dx + (lat - lat1) * dy) / len2));
+    const plon = lon1 + t * dx;
+    const plat = lat1 + t * dy;
+    const d = sqDist(plat, plon, lat, lon);
+    if (d < bestSq) {
+      bestSq = d;
+      bestLat = plat;
+      bestLon = plon;
+      bestProgress01 = (i + t) / (n - 1);
     }
   }
-  return bestIdx;
+  return { lat: bestLat, lon: bestLon, distSq: bestSq, progress01: bestProgress01 };
+}
+
+/** Via: на коридоре маршрута, слегка к POI — не заставляет ORS «втыкаться» точно в узел объекта (аппендиксы). */
+function corridorViaFromPoi(route: [number, number][], poiLat: number, poiLon: number): [number, number] | null {
+  const foot = nearestFootOnPolyline(route, poiLat, poiLon);
+  if (!foot) return null;
+  const towardPoiBias = 0.32;
+  const vLat = foot.lat + (poiLat - foot.lat) * towardPoiBias;
+  const vLon = foot.lon + (poiLon - foot.lon) * towardPoiBias;
+  return [vLat, vLon];
+}
+
+function summaryDistanceMeters(feature: GeoJSON.Feature<GeoJSON.LineString>): number | null {
+  const s = (feature.properties as { summary?: { distance?: number } } | undefined)?.summary?.distance;
+  return typeof s === "number" && Number.isFinite(s) ? s : null;
 }
 
 function objectTypeLabel(tags: Record<string, string> | undefined, fallback?: string): string {
@@ -594,49 +618,41 @@ export function RouteMapWidget() {
       const mainRoute = routeFeaturesRaw[0] ?? null;
       const mainRouteLatLon = mainRoute ? routeLatLonCoords(mainRoute) : [];
       const hasOverpassCandidates = overpassFeatures.length > 0;
-      const coreCandidates = hasOverpassCandidates
-        ? objects.map((obj) => ({
-            lat: obj.x,
-            lon: obj.y,
-            source: "core" as const,
-            distance: mainRouteLatLon.length ? minSqDistToRoute(mainRouteLatLon, obj.x, obj.y) : Number.POSITIVE_INFINITY,
-          }))
-        : [];
-      const overpassCandidates = overpassFeatures
+      const corridorThresholdSq = 0.0018 * 0.0018;
+      const corePts = hasOverpassCandidates ? objects.map((obj) => ({ lat: obj.x, lon: obj.y })) : [];
+      const overpassPts = overpassFeatures
         .map((poi) => {
-          const coords = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
-          if (!coords || coords.length < 2) return null;
-          const lat = coords[1];
-          const lon = coords[0];
-          return {
-            lat,
-            lon,
-            source: "overpass" as const,
-            distance: mainRouteLatLon.length ? minSqDistToRoute(mainRouteLatLon, lat, lon) : Number.POSITIVE_INFINITY,
-          };
+          const c = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
+          if (!c || c.length < 2) return null;
+          return { lat: c[1], lon: c[0] };
         })
-        .filter((x): x is { lat: number; lon: number; source: "overpass"; distance: number } => Boolean(x));
-      const viaCandidates = [...coreCandidates, ...overpassCandidates]
+        .filter((x): x is { lat: number; lon: number } => Boolean(x));
+      const viaCandidates = [...corePts, ...overpassPts]
         .map((item) => {
-          const idx = nearestRouteIndex(mainRouteLatLon, item.lat, item.lon);
-          const progress = idx >= 0 && mainRouteLatLon.length > 1 ? idx / (mainRouteLatLon.length - 1) : 0;
-          return { ...item, routeIdx: idx, progress };
+          if (!mainRouteLatLon.length) return null;
+          const foot = nearestFootOnPolyline(mainRouteLatLon, item.lat, item.lon);
+          if (!foot) return null;
+          return { ...item, progress: foot.progress01, polyDistSq: foot.distSq };
         })
-        .filter((item) => item.routeIdx >= 0)
-        .filter((item) => item.progress > 0.15 && item.progress < 0.85)
-        .filter((item) => item.distance < 0.0018 * 0.0018)
-        .sort((a, b) => a.distance - b.distance)
-        .filter((item, idx, arr) => arr.findIndex((x) => Math.abs(x.progress - item.progress) < 0.06) === idx)
+        .filter((x): x is { lat: number; lon: number; progress: number; polyDistSq: number } => Boolean(x))
+        .filter((item) => item.progress > 0.12 && item.progress < 0.88)
+        .filter((item) => item.polyDistSq <= corridorThresholdSq)
+        .sort((a, b) => a.polyDistSq - b.polyDistSq)
+        .filter((item, idx, arr) => arr.findIndex((x) => Math.abs(x.progress - item.progress) < 0.05) === idx)
         .slice(0, 8);
 
       const extraFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       let sawRateLimit = false;
       const now = Date.now();
       const inRateLimitCooldown = now < altRateLimitUntilRef.current;
+      const baseRouteMeters = mainRoute ? summaryDistanceMeters(mainRoute) : null;
+      const maxDetourRatio = 1.36;
       if (!inRateLimitCooldown) {
         for (const candidate of viaCandidates) {
           if (sawRateLimit) break;
           if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
+          const viaLL = corridorViaFromPoi(mainRouteLatLon, candidate.lat, candidate.lon);
+          if (!viaLL) continue;
           const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -644,7 +660,7 @@ export function RouteMapWidget() {
               from: fromCoord,
               to: toCoord,
               profile: requestProfile,
-              via: [[candidate.lat, candidate.lon]],
+              via: [viaLL],
             }),
           });
           const viaText = await viaRes.text();
@@ -663,6 +679,14 @@ export function RouteMapWidget() {
           const viaFeatures = routeFeaturesFromOrs(viaData);
           const first = viaFeatures[0];
           if (!first) continue;
+          const altMeters = summaryDistanceMeters(first);
+          if (
+            baseRouteMeters != null &&
+            altMeters != null &&
+            altMeters > baseRouteMeters * maxDetourRatio
+          ) {
+            continue;
+          }
           const firstCoords = first.geometry.coordinates ?? [];
           const duplicate = [...routeFeaturesRaw, ...extraFeatures].some((rf) => {
             const c = rf.geometry.coordinates ?? [];
