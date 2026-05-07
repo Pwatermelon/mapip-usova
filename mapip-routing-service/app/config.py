@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     openroute_api_key: str = ""
     nominatim_user_agent: str = "MAPIP-Routing-Service/1.0 (university project)"
+    redis_url: str = ""
 
 
 settings = Settings()

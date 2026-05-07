@@ -159,6 +159,7 @@ export function RouteMapWidget() {
   const meMarkerRef = useRef<maplibregl.Marker | null>(null);
   const geoWatchIdRef = useRef<number | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const altRateLimitUntilRef = useRef(0);
   const fromSuggestReqRef = useRef(0);
   const toSuggestReqRef = useRef(0);
   const fromSuggestTimerRef = useRef<number | null>(null);
@@ -630,45 +631,50 @@ export function RouteMapWidget() {
 
       const extraFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       let sawRateLimit = false;
-      for (const candidate of viaCandidates) {
-        if (sawRateLimit) break;
-        if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
-        const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            from: fromCoord,
-            to: toCoord,
-            profile: requestProfile,
-            via: [[candidate.lat, candidate.lon]],
-          }),
-        });
-        const viaText = await viaRes.text();
-        if (viaRes.status === 429) {
-          sawRateLimit = true;
-          continue;
+      const now = Date.now();
+      const inRateLimitCooldown = now < altRateLimitUntilRef.current;
+      if (!inRateLimitCooldown) {
+        for (const candidate of viaCandidates) {
+          if (sawRateLimit) break;
+          if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
+          const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              from: fromCoord,
+              to: toCoord,
+              profile: requestProfile,
+              via: [[candidate.lat, candidate.lon]],
+            }),
+          });
+          const viaText = await viaRes.text();
+          if (viaRes.status === 429) {
+            sawRateLimit = true;
+            altRateLimitUntilRef.current = Date.now() + 60_000;
+            continue;
+          }
+          if (!viaRes.ok || hasOrs2007(viaText)) continue;
+          let viaData: OrsGeoJson;
+          try {
+            viaData = JSON.parse(viaText) as OrsGeoJson;
+          } catch {
+            continue;
+          }
+          const viaFeatures = routeFeaturesFromOrs(viaData);
+          const first = viaFeatures[0];
+          if (!first) continue;
+          const firstCoords = first.geometry.coordinates ?? [];
+          const duplicate = [...routeFeaturesRaw, ...extraFeatures].some((rf) => {
+            const c = rf.geometry.coordinates ?? [];
+            if (c.length !== firstCoords.length) return false;
+            if (!c.length) return true;
+            const a = c[Math.floor(c.length / 2)];
+            const b = firstCoords[Math.floor(firstCoords.length / 2)];
+            return Math.abs(a[0] - b[0]) < 0.00015 && Math.abs(a[1] - b[1]) < 0.00015;
+          });
+          if (duplicate) continue;
+          extraFeatures.push(first);
         }
-        if (!viaRes.ok || hasOrs2007(viaText)) continue;
-        let viaData: OrsGeoJson;
-        try {
-          viaData = JSON.parse(viaText) as OrsGeoJson;
-        } catch {
-          continue;
-        }
-        const viaFeatures = routeFeaturesFromOrs(viaData);
-        const first = viaFeatures[0];
-        if (!first) continue;
-        const firstCoords = first.geometry.coordinates ?? [];
-        const duplicate = [...routeFeaturesRaw, ...extraFeatures].some((rf) => {
-          const c = rf.geometry.coordinates ?? [];
-          if (c.length !== firstCoords.length) return false;
-          if (!c.length) return true;
-          const a = c[Math.floor(c.length / 2)];
-          const b = firstCoords[Math.floor(firstCoords.length / 2)];
-          return Math.abs(a[0] - b[0]) < 0.00015 && Math.abs(a[1] - b[1]) < 0.00015;
-        });
-        if (duplicate) continue;
-        extraFeatures.push(first);
       }
 
       const allRouteFeatures = [...routeFeaturesRaw, ...extraFeatures].slice(0, alternativeCount);
@@ -693,7 +699,9 @@ export function RouteMapWidget() {
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
       setMsg(`Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.`);
-      if (sawRateLimit) {
+      if (inRateLimitCooldown) {
+        setErr("Сервис маршрутов ограничил частоту. Временный режим: строится базовый маршрут, альтернативы будут снова догружаться автоматически через ~1 минуту.");
+      } else if (sawRateLimit) {
         setErr("Сервис маршрутов временно ограничил частоту запросов (429). Показаны доступные варианты без лишних догрузок.");
       }
     } catch (e) {

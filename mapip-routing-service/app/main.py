@@ -4,10 +4,16 @@ MAPIP Routing microservice — внешнее API в духе картограф
 """
 from typing import Any
 import re
+import time
+import json
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+try:
+    from redis.asyncio import Redis
+except Exception:  # pragma: no cover
+    Redis = None  # type: ignore[assignment]
 
 from app.config import settings
 
@@ -24,6 +30,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_OVERPASS_CACHE_TTL_SECONDS = 300
+_overpass_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_redis_client: Any = None
+
+
+@app.on_event("shutdown")
+async def _close_redis() -> None:
+    global _redis_client
+    if _redis_client is not None:
+        try:
+            await _redis_client.close()
+        except Exception:
+            pass
+        _redis_client = None
 
 
 @app.get("/health")
@@ -136,22 +157,15 @@ async def _fetch_accessibility_candidates(
           node["amenity"="drinking_water"]({min_lat},{min_lon},{max_lat},{max_lon});
           node["tourism"="museum"]({min_lat},{min_lon},{max_lat},{max_lon});
         """
-    query = f"""
-    [out:json][timeout:20];
-    (
-      {clauses}
-    );
-    out center tags;
-    """.format(min_lat=min_lat, min_lon=min_lon, max_lat=max_lat, max_lon=max_lon)
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": query},
-            headers={"User-Agent": settings.nominatim_user_agent},
-        )
-    if not r.is_success:
+    data = await _fetch_overpass_raw(
+        min_lon=min_lon,
+        min_lat=min_lat,
+        max_lon=max_lon,
+        max_lat=max_lat,
+        profile=profile,
+    )
+    if not data:
         return []
-    data = r.json()
     out: list[list[float]] = []
     for el in data.get("elements", []):
         lat = el.get("lat")
@@ -166,6 +180,101 @@ async def _fetch_accessibility_candidates(
         if len(out) >= limit:
             break
     return out
+
+
+def _overpass_cache_key(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    profile: str,
+) -> str:
+    # Квантование bbox, чтобы близкие запросы переиспользовали один и тот же кэш.
+    q = 0.01
+    def r(v: float) -> float:
+        return round(v / q) * q
+    return f"{profile}:{r(min_lon):.2f},{r(min_lat):.2f},{r(max_lon):.2f},{r(max_lat):.2f}"
+
+
+async def _get_redis() -> Any:
+    global _redis_client
+    if not settings.redis_url or Redis is None:
+        return None
+    if _redis_client is None:
+        try:
+            _redis_client = Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
+            await _redis_client.ping()
+        except Exception:
+            _redis_client = None
+            return None
+    return _redis_client
+
+
+def _overpass_clauses(profile: str) -> str:
+    if profile == "wheelchair":
+        return """
+          node["highway"="steps"]({min_lat},{min_lon},{max_lat},{max_lon});
+          way["highway"="steps"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
+          way["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["kerb"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["ramp"]({min_lat},{min_lon},{max_lat},{max_lon});
+        """
+    return """
+          node["amenity"="drinking_water"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["tourism"="museum"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["tourism"="hotel"]({min_lat},{min_lon},{max_lat},{max_lon});
+          node["amenity"="toilets"]({min_lat},{min_lon},{max_lat},{max_lon});
+        """
+
+
+async def _fetch_overpass_raw(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    profile: str,
+) -> dict[str, Any] | None:
+    key = _overpass_cache_key(min_lon, min_lat, max_lon, max_lat, profile)
+    now = time.time()
+    redis = await _get_redis()
+    if redis is not None:
+        try:
+            raw = await redis.get(f"overpass:{key}")
+            if raw:
+                cached_data = json.loads(raw)
+                _overpass_cache[key] = (now + _OVERPASS_CACHE_TTL_SECONDS, cached_data)
+                return cached_data
+        except Exception:
+            pass
+    cached = _overpass_cache.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    clauses = _overpass_clauses(profile)
+    query = f"""
+    [out:json][timeout:25];
+    (
+      {clauses}
+    );
+    out center tags;
+    """.format(min_lat=min_lat, min_lon=min_lon, max_lat=max_lat, max_lon=max_lon)
+    async with httpx.AsyncClient(timeout=40.0) as client:
+        r = await client.post(
+            "https://overpass-api.de/api/interpreter",
+            data={"data": query},
+            headers={"User-Agent": settings.nominatim_user_agent},
+        )
+    if not r.is_success:
+        return None
+    data = r.json()
+    _overpass_cache[key] = (now + _OVERPASS_CACHE_TTL_SECONDS, data)
+    if redis is not None:
+        try:
+            await redis.setex(f"overpass:{key}", _OVERPASS_CACHE_TTL_SECONDS, json.dumps(data))
+        except Exception:
+            pass
+    return data
 
 
 def _merge_geojson_features(collections: list[dict[str, Any]]) -> dict[str, Any]:
@@ -475,41 +584,15 @@ async def overpass_objects(
     except Exception as e:
         raise HTTPException(status_code=400, detail="bbox: ожидается minLon,minLat,maxLon,maxLat") from e
 
-    # Простые профили выборки: для колясочников добавляем барьеры/пандусы,
-    # для пешехода — общественно полезные POI.
-    if profile == "wheelchair":
-        clauses = """
-          node["highway"="steps"]({min_lat},{min_lon},{max_lat},{max_lon});
-          way["highway"="steps"]({min_lat},{min_lon},{max_lat},{max_lon});
-          node["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
-          way["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
-          node["kerb"]({min_lat},{min_lon},{max_lat},{max_lon});
-        """
-    else:
-        clauses = """
-          node["amenity"="drinking_water"]({min_lat},{min_lon},{max_lat},{max_lon});
-          node["tourism"="museum"]({min_lat},{min_lon},{max_lat},{max_lon});
-          node["tourism"="hotel"]({min_lat},{min_lon},{max_lat},{max_lon});
-          node["amenity"="toilets"]({min_lat},{min_lon},{max_lat},{max_lon});
-        """
-
-    query = f"""
-    [out:json][timeout:25];
-    (
-      {clauses}
-    );
-    out center tags;
-    """.format(min_lat=min_lat, min_lon=min_lon, max_lat=max_lat, max_lon=max_lon)
-
-    async with httpx.AsyncClient(timeout=40.0) as client:
-        r = await client.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": query},
-            headers={"User-Agent": settings.nominatim_user_agent},
-        )
-    if not r.is_success:
+    data = await _fetch_overpass_raw(
+        min_lon=min_lon,
+        min_lat=min_lat,
+        max_lon=max_lon,
+        max_lat=max_lat,
+        profile=profile,
+    )
+    if not data:
         raise HTTPException(status_code=502, detail="Overpass API error")
-    data = r.json()
     features: list[dict[str, Any]] = []
     for el in data.get("elements", []):
         lat = el.get("lat")
