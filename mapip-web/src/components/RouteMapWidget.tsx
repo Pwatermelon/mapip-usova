@@ -120,9 +120,9 @@ function corridorViaFromPoi(
   const len = Math.sqrt(dx * dx + dy * dy) || 1e-12;
   const px = -dy / len;
   const py = dx / len;
-  const lateralDeg = (0.00035 + variant * 0.00012) * (variant % 2 === 0 ? 1 : -1);
-  const towardBiases = [0.22, 0.34, 0.46];
-  const towardPoiBias = towardBiases[variant % towardBiases.length] ?? 0.3;
+  const lateralDeg = (0.00028 + (variant % 3) * 0.0001) * (variant % 2 === 0 ? 1 : -1);
+  const towardBiases = [0.08, 0.11, 0.14];
+  const towardPoiBias = towardBiases[variant % towardBiases.length] ?? 0.1;
   let vLat = foot.lat + (poiLat - foot.lat) * towardPoiBias;
   let vLon = foot.lon + (poiLon - foot.lon) * towardPoiBias;
   vLat += px * lateralDeg;
@@ -130,7 +130,10 @@ function corridorViaFromPoi(
   return [vLat, vLon];
 }
 
-/** Грубое сравнение геометрии двух маршрутов (разная длина полилинии допускается). */
+/**
+ * Одна ли это геометрия: только если большинство выборочных точек очень близко.
+ * Не режем три близкие, но разные альтернативы ORS (~50 м между линиями — ок).
+ */
 function routesNearlyCoincident(
   a: GeoJSON.Feature<GeoJSON.LineString>,
   b: GeoJSON.Feature<GeoJSON.LineString>,
@@ -138,9 +141,12 @@ function routesNearlyCoincident(
   const ca = a.geometry.coordinates ?? [];
   const cb = b.geometry.coordinates ?? [];
   if (ca.length < 2 || cb.length < 2) return true;
-  const samples = 12;
+  const samples = 16;
+  const tightLat = 0.000038;
+  const tightLon = 0.000055;
+  let closePoints = 0;
   for (let i = 0; i < samples; i += 1) {
-    const t = i / (samples - 1);
+    const t = i / Math.max(1, samples - 1);
     const ia = Math.min(ca.length - 1, Math.round(t * (ca.length - 1)));
     const ib = Math.min(cb.length - 1, Math.round(t * (cb.length - 1)));
     const pa = ca[ia] as number[];
@@ -149,9 +155,35 @@ function routesNearlyCoincident(
     const latA = pa[1];
     const lonB = pb[0];
     const latB = pb[1];
-    if (Math.abs(latA - latB) > 0.00012 || Math.abs(lonA - lonB) > 0.00012) return false;
+    if (Math.abs(latA - latB) <= tightLat && Math.abs(lonA - lonB) <= tightLon) closePoints += 1;
   }
-  return true;
+  return closePoints / samples >= 0.82;
+}
+
+/** Via на полилине базового маршрута со сносом вбок (~60–140 м по графу после OSM-снапа) — без «заезда» в объект. */
+function viaAlongPolylineBias(
+  route: [number, number][],
+  progress01: number,
+  lateralSign: 1 | -1,
+  lateralStrength: number,
+): [number, number] | null {
+  if (route.length < 2) return null;
+  const n = route.length;
+  const f = Math.max(0, Math.min(1, progress01)) * (n - 1);
+  const i = Math.min(n - 2, Math.floor(f));
+  const tt = Math.max(0, Math.min(1, f - i));
+  const [lat1, lon1] = route[i];
+  const [lat2, lon2] = route[i + 1];
+  const lat = lat1 + (lat2 - lat1) * tt;
+  const lon = lon1 + (lon2 - lon1) * tt;
+  const dx = lon2 - lon1;
+  const dy = lat2 - lat1;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1e-12;
+  const px = (-dy / len) * lateralSign;
+  const py = (dx / len) * lateralSign;
+  const latDeg = 0.00035 * lateralStrength;
+  const lonDeg = 0.0005 * lateralStrength;
+  return [lat + px * latDeg, lon + py * lonDeg];
 }
 
 function stepObstaclePoints(overpass: GeoJSON.Feature[]): { lat: number; lon: number }[] {
@@ -700,8 +732,11 @@ export function RouteMapWidget() {
       const mainRoute = routeFeaturesRaw[0] ?? null;
       const mainRouteLatLon = mainRoute ? routeLatLonCoords(mainRoute) : [];
       const hasOverpassCandidates = overpassFeatures.length > 0;
-      const corridorThresholdSq = 0.0018 * 0.0018;
-      const corePts = hasOverpassCandidates ? objects.map((obj) => ({ lat: obj.x, lon: obj.y })) : [];
+      const corridorThresholdSq = 0.0022 * 0.0022;
+      const corePts =
+        alternativeCount > 1 && (hasOverpassCandidates || objects.length > 0)
+          ? objects.map((obj) => ({ lat: obj.x, lon: obj.y }))
+          : [];
       const overpassPts = overpassFeatures
         .map((poi) => {
           const tags = (poi.properties as { tags?: Record<string, string> } | undefined)?.tags;
@@ -733,58 +768,81 @@ export function RouteMapWidget() {
       const now = Date.now();
       const inRateLimitCooldown = now < altRateLimitUntilRef.current;
       const baseRouteMeters = mainRoute ? summaryDistanceMeters(mainRoute) : null;
-      const maxDetourRatio = 1.42;
+      const maxDetourRatio = 1.48;
+
+      const pushExtraFromVia = async (viaLL: [number, number]): Promise<boolean> => {
+        if (inRateLimitCooldown) return false;
+        if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) return true;
+        const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from: fromCoord,
+            to: toCoord,
+            profile: requestProfile,
+            via: [viaLL],
+          }),
+        });
+        const viaText = await viaRes.text();
+        if (viaRes.status === 429) {
+          sawRateLimit = true;
+          altRateLimitUntilRef.current = Date.now() + 60_000;
+          return false;
+        }
+        if (!viaRes.ok || hasOrs2007(viaText)) return false;
+        let viaData: OrsGeoJson;
+        try {
+          viaData = JSON.parse(viaText) as OrsGeoJson;
+        } catch {
+          return false;
+        }
+        const viaFeatures = routeFeaturesFromOrs(viaData);
+        const first = viaFeatures[0];
+        if (!first) return false;
+        const altMeters = summaryDistanceMeters(first);
+        if (baseRouteMeters != null && altMeters != null && altMeters > baseRouteMeters * maxDetourRatio) {
+          return false;
+        }
+        if (
+          requestProfile === "wheelchair" &&
+          routeUnacceptableNearSteps(first, stepHazardPoints, wheelchairStepsNearSq)
+        ) {
+          return false;
+        }
+        const dupGeom = [...routeFeaturesRaw, ...extraFeatures].some((rf) => routesNearlyCoincident(rf, first));
+        if (dupGeom) return false;
+        extraFeatures.push(first);
+        return routeFeaturesRaw.length + extraFeatures.length >= alternativeCount;
+      };
+
       if (!inRateLimitCooldown) {
         for (const candidate of viaCandidates) {
           if (sawRateLimit) break;
           if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
           const viaLL = corridorViaFromPoi(mainRouteLatLon, candidate.lat, candidate.lon, extraFeatures.length);
           if (!viaLL) continue;
-          const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              from: fromCoord,
-              to: toCoord,
-              profile: requestProfile,
-              via: [viaLL],
-            }),
-          });
-          const viaText = await viaRes.text();
-          if (viaRes.status === 429) {
-            sawRateLimit = true;
-            altRateLimitUntilRef.current = Date.now() + 60_000;
-            continue;
-          }
-          if (!viaRes.ok || hasOrs2007(viaText)) continue;
-          let viaData: OrsGeoJson;
-          try {
-            viaData = JSON.parse(viaText) as OrsGeoJson;
-          } catch {
-            continue;
-          }
-          const viaFeatures = routeFeaturesFromOrs(viaData);
-          const first = viaFeatures[0];
-          if (!first) continue;
-          const altMeters = summaryDistanceMeters(first);
-          if (
-            baseRouteMeters != null &&
-            altMeters != null &&
-            altMeters > baseRouteMeters * maxDetourRatio
-          ) {
-            continue;
-          }
-          if (
-            requestProfile === "wheelchair" &&
-            routeUnacceptableNearSteps(first, stepHazardPoints, wheelchairStepsNearSq)
-          ) {
-            continue;
-          }
-          const dupGeom = [...routeFeaturesRaw, ...extraFeatures].some((rf) =>
-            routesNearlyCoincident(rf, first),
-          );
-          if (dupGeom) continue;
-          extraFeatures.push(first);
+          const done = await pushExtraFromVia(viaLL);
+          if (done) break;
+        }
+
+        const corridorSeeds: { progress: number; side: 1 | -1; strength: number }[] = [
+          { progress: 0.39, side: -1, strength: 1.25 },
+          { progress: 0.56, side: 1, strength: 1.15 },
+          { progress: 0.71, side: -1, strength: 1.38 },
+        ];
+        let corridorIdx = 0;
+        while (
+          mainRouteLatLon.length >= 2 &&
+          corridorIdx < corridorSeeds.length &&
+          routeFeaturesRaw.length + extraFeatures.length < alternativeCount &&
+          !sawRateLimit
+        ) {
+          const cs = corridorSeeds[corridorIdx];
+          corridorIdx += 1;
+          const viaLL = viaAlongPolylineBias(mainRouteLatLon, cs.progress, cs.side, cs.strength);
+          if (!viaLL) continue;
+          const done = await pushExtraFromVia(viaLL);
+          if (done) break;
         }
       }
 
