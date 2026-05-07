@@ -59,12 +59,15 @@ jobs:
             DEPLOY="${{ secrets.DEPLOY_PATH }}"
             cd "$DEPLOY"
 
-            # Используем только docker compose v2.
-            # docker-compose v1 падает с KeyError: 'ContainerConfig' на recreate.
+            # Поддержка и v2, и v1 (на сервере пользователя может быть только docker-compose).
             if docker compose version >/dev/null 2>&1; then
               compose() { docker compose "$@"; }
+              COMPOSE_V1=0
+            elif command -v docker-compose >/dev/null 2>&1; then
+              compose() { docker-compose "$@"; }
+              COMPOSE_V1=1
             else
-              echo "Нужен Docker Compose v2 (docker compose plugin). docker-compose v1 не поддерживается." >&2
+              echo "Нужен Docker Compose: docker compose (v2) или docker-compose (v1)." >&2
               exit 1
             fi
 
@@ -72,9 +75,11 @@ jobs:
             if [ -f docker-compose.yml ]; then
               compose down --remove-orphans || true
             fi
-            # На всякий случай удаляем контейнеры текущего compose-проекта,
-            # чтобы не было конфликтов с метаданными старых образов.
-            docker ps -aq --filter "label=com.docker.compose.project" | xargs -r docker rm -f || true
+            # Для старого docker-compose дополнительно чистим контейнеры проекта:
+            # это обходит KeyError: 'ContainerConfig' при recreate_container.
+            if [ "${COMPOSE_V1:-0}" = "1" ]; then
+              compose rm -f -s -v || true
+            fi
 
             # 2) Снести артефакты прошлого деплоя
             rm -rf mapip-core mapip-routing-service mapip-web MapApplication-master data
@@ -91,7 +96,11 @@ jobs:
               compose build --pull || compose build
             fi
 
-            compose up -d --remove-orphans
+            if [ "${COMPOSE_V1:-0}" = "1" ]; then
+              compose up -d --force-recreate --remove-orphans
+            else
+              compose up -d --remove-orphans
+            fi
 
             docker image prune -f
             rm -f deploy.tar.gz
