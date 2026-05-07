@@ -308,10 +308,14 @@ async def _build_offset_alternatives(
         return []
     out: list[dict[str, Any]] = []
     base_line = _extract_first_line_coords(base_geo)
-    if len(base_line) < 4:
+    if len(base_line) < 2:
         return out
-    samples = [base_line[len(base_line) // 3], base_line[(len(base_line) * 2) // 3]]
-    offsets = [0.004, -0.004, 0.007, -0.007]
+    n = len(base_line)
+    idxs = sorted({0, n // 4, n // 3, (2 * n) // 3, (3 * n) // 4, n - 1})
+    samples = [base_line[i] for i in idxs if 0 <= i < n]
+    if len(samples) < 2:
+        samples = [base_line[0], base_line[-1]]
+    offsets = [0.0012, -0.0012, 0.0024, -0.0024, 0.004, -0.004, 0.0065, -0.0065]
     for sample in samples:
         if len(out) >= need_count:
             break
@@ -319,7 +323,7 @@ async def _build_offset_alternatives(
         for delta in offsets:
             if len(out) >= need_count:
                 break
-            via = [sx + delta, sy - delta]
+            via = [sx + delta, sy - delta * 0.85]
             r_via = await _post_ors_points(profile, [start, via, end])
             if not r_via.is_success or _has_ors_2007(r_via.text):
                 continue
@@ -454,7 +458,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         payload: dict[str, Any] = {
             "coordinates": coordinates,
             "options": {
-                "alternative_routes": {"target_count": alt, "weight_factor": 1.45}
+                "alternative_routes": {"target_count": alt, "weight_factor": 1.82}
             },
         }
         r = await _post_ors(profile, payload)
@@ -476,7 +480,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         # Остаемся строго в ORS: fallback на directions/{profile} + geometry_format=geojson.
         fallback_payload: dict[str, Any] = {"coordinates": coordinates}
         if alt > 1:
-            fallback_payload["options"] = {"alternative_routes": {"target_count": alt, "weight_factor": 1.45}}
+            fallback_payload["options"] = {"alternative_routes": {"target_count": alt, "weight_factor": 1.82}}
         r_json = await _post_ors_json_geo(profile, fallback_payload)
         if (_has_unknown_alternative_routes(r_json.text) and alt > 1) or (
             not r_json.is_success and alt > 1

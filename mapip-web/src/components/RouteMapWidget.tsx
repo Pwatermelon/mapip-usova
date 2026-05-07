@@ -130,34 +130,53 @@ function corridorViaFromPoi(
   return [vLat, vLon];
 }
 
-/**
- * Одна ли это геометрия: только если большинство выборочных точек очень близко.
- * Не режем три близкие, но разные альтернативы ORS (~50 м между линиями — ок).
- */
-function routesNearlyCoincident(
+/** Приблизительное расстояние между двумя точками в метрах (плоская аппроксимация). */
+function metersApprox(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLat = (lat2 - lat1) * 111320;
+  const dLon = (lon2 - lon1) * 111320 * Math.cos(((lat1 + lat2) / 2) * (Math.PI / 180));
+  return Math.sqrt(dLat * dLat + dLon * dLon);
+}
+
+/** Доля точек полилинии A, лежащих близко к B (частичное совпадение участков — норма). */
+function overlapFractionAlong(
+  a: GeoJSON.Feature<GeoJSON.LineString>,
+  b: GeoJSON.Feature<GeoJSON.LineString>,
+  closeMeters: number,
+  sampleCount = 36,
+): number {
+  const la = routeLatLonCoords(a);
+  const lbRaw = b.geometry.coordinates ?? [];
+  const lb: [number, number][] = lbRaw.map((c) => [c[1], c[0]]);
+  if (la.length < 2 || lb.length < 2) return 1;
+  let close = 0;
+  for (let i = 0; i < sampleCount; i += 1) {
+    const idx = Math.min(la.length - 1, Math.round((i / Math.max(1, sampleCount - 1)) * (la.length - 1)));
+    const [lat, lon] = la[idx];
+    const foot = nearestFootOnPolyline(lb, lat, lon);
+    if (!foot) continue;
+    if (metersApprox(lat, lon, foot.lat, foot.lon) <= closeMeters) close += 1;
+  }
+  return close / sampleCount;
+}
+
+/** Почти одна и та же линия (≈100% наложение), а не просто общий кусок пути. */
+function isAlmostFullOverlap(
   a: GeoJSON.Feature<GeoJSON.LineString>,
   b: GeoJSON.Feature<GeoJSON.LineString>,
 ): boolean {
-  const ca = a.geometry.coordinates ?? [];
-  const cb = b.geometry.coordinates ?? [];
-  if (ca.length < 2 || cb.length < 2) return true;
-  const samples = 16;
-  const tightLat = 0.000038;
-  const tightLon = 0.000055;
-  let closePoints = 0;
-  for (let i = 0; i < samples; i += 1) {
-    const t = i / Math.max(1, samples - 1);
-    const ia = Math.min(ca.length - 1, Math.round(t * (ca.length - 1)));
-    const ib = Math.min(cb.length - 1, Math.round(t * (cb.length - 1)));
-    const pa = ca[ia] as number[];
-    const pb = cb[ib] as number[];
-    const lonA = pa[0];
-    const latA = pa[1];
-    const lonB = pb[0];
-    const latB = pb[1];
-    if (Math.abs(latA - latB) <= tightLat && Math.abs(lonA - lonB) <= tightLon) closePoints += 1;
-  }
-  return closePoints / samples >= 0.82;
+  const corridorM = 14;
+  const minOverlapBothWays = 0.9;
+  return (
+    overlapFractionAlong(a, b, corridorM) >= minOverlapBothWays &&
+    overlapFractionAlong(b, a, corridorM) >= minOverlapBothWays
+  );
+}
+
+function isTooSimilarRoute(
+  candidate: GeoJSON.Feature<GeoJSON.LineString>,
+  existing: GeoJSON.Feature<GeoJSON.LineString>[],
+): boolean {
+  return existing.some((ex) => isAlmostFullOverlap(candidate, ex));
 }
 
 /** Via на полилине базового маршрута со сносом вбок (~60–140 м по графу после OSM-снапа) — без «заезда» в объект. */
@@ -181,8 +200,8 @@ function viaAlongPolylineBias(
   const len = Math.sqrt(dx * dx + dy * dy) || 1e-12;
   const px = (-dy / len) * lateralSign;
   const py = (dx / len) * lateralSign;
-  const latDeg = 0.00035 * lateralStrength;
-  const lonDeg = 0.0005 * lateralStrength;
+  const latDeg = 0.00042 * lateralStrength;
+  const lonDeg = 0.00062 * lateralStrength;
   return [lat + px * latDeg, lon + py * lonDeg];
 }
 
@@ -302,7 +321,7 @@ export function RouteMapWidget() {
   const [fromQ, setFromQ] = useState("");
   const [toQ, setToQ] = useState("");
   const [profile, setProfile] = useState("foot-walking");
-  const [alternativeCount, setAlternativeCount] = useState(1);
+  const [alternativeCount, setAlternativeCount] = useState(3);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [objects, setObjects] = useState<MapObject[]>([]);
@@ -693,7 +712,8 @@ export function RouteMapWidget() {
       const routeBasesAll = routeFeaturesFromOrs(data);
       const routeFeaturesRaw: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       for (const f of routeBasesAll) {
-        if (routeFeaturesRaw.some((x) => routesNearlyCoincident(x, f))) continue;
+        if (routeFeaturesRaw.length >= alternativeCount) break;
+        if (isTooSimilarRoute(f, routeFeaturesRaw)) continue;
         routeFeaturesRaw.push(f);
       }
       const coords = lineCoordsFromOrs(data);
@@ -768,7 +788,7 @@ export function RouteMapWidget() {
       const now = Date.now();
       const inRateLimitCooldown = now < altRateLimitUntilRef.current;
       const baseRouteMeters = mainRoute ? summaryDistanceMeters(mainRoute) : null;
-      const maxDetourRatio = 1.48;
+      const maxDetourRatio = alternativeCount >= 3 ? 1.72 : 1.52;
 
       const pushExtraFromVia = async (viaLL: [number, number]): Promise<boolean> => {
         if (inRateLimitCooldown) return false;
@@ -809,8 +829,7 @@ export function RouteMapWidget() {
         ) {
           return false;
         }
-        const dupGeom = [...routeFeaturesRaw, ...extraFeatures].some((rf) => routesNearlyCoincident(rf, first));
-        if (dupGeom) return false;
+        if (isTooSimilarRoute(first, [...routeFeaturesRaw, ...extraFeatures])) return false;
         extraFeatures.push(first);
         return routeFeaturesRaw.length + extraFeatures.length >= alternativeCount;
       };
@@ -825,24 +844,23 @@ export function RouteMapWidget() {
           if (done) break;
         }
 
-        const corridorSeeds: { progress: number; side: 1 | -1; strength: number }[] = [
-          { progress: 0.39, side: -1, strength: 1.25 },
-          { progress: 0.56, side: 1, strength: 1.15 },
-          { progress: 0.71, side: -1, strength: 1.38 },
-        ];
-        let corridorIdx = 0;
-        while (
-          mainRouteLatLon.length >= 2 &&
-          corridorIdx < corridorSeeds.length &&
-          routeFeaturesRaw.length + extraFeatures.length < alternativeCount &&
-          !sawRateLimit
-        ) {
-          const cs = corridorSeeds[corridorIdx];
-          corridorIdx += 1;
-          const viaLL = viaAlongPolylineBias(mainRouteLatLon, cs.progress, cs.side, cs.strength);
-          if (!viaLL) continue;
-          const done = await pushExtraFromVia(viaLL);
-          if (done) break;
+        const progresses = [0.26, 0.38, 0.5, 0.62, 0.74];
+        const strengths = [1.05, 1.75, 2.55, 3.35];
+        const sides: (1 | -1)[] = [-1, 1];
+        let corridorAttempts = 0;
+        outerCorridor: for (const p of progresses) {
+          for (const side of sides) {
+            for (const st of strengths) {
+              corridorAttempts += 1;
+              if (corridorAttempts > 28) break outerCorridor;
+              if (sawRateLimit) break outerCorridor;
+              if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break outerCorridor;
+              const viaLL = viaAlongPolylineBias(mainRouteLatLon, p, side, st);
+              if (!viaLL) continue;
+              const done = await pushExtraFromVia(viaLL);
+              if (done) break outerCorridor;
+            }
+          }
         }
       }
 
