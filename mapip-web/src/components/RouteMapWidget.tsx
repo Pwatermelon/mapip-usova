@@ -245,14 +245,6 @@ export function RouteMapWidget() {
           "line-opacity": ["match", ["coalesce", ["get", "routeIndex"], 0], 0, 0.95, 1, 0.7, 2, 0.55, 0.5],
         },
       });
-      map.on("click", "core-objects-circles", (e) => {
-        const f = e.features?.[0];
-        const coords = f?.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
-        if (!coords) return;
-        const name = String((f.properties as { name?: string } | undefined)?.name ?? "Объект из базы");
-        popupRef.current?.remove();
-        popupRef.current = new maplibregl.Popup({ offset: 12 }).setLngLat([coords[0], coords[1]]).setText(name).addTo(map);
-      });
       map.addSource("core-objects", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -268,6 +260,14 @@ export function RouteMapWidget() {
           "circle-stroke-color": "#1e3a8a",
           "circle-opacity": 0.85,
         },
+      });
+      map.on("click", "core-objects-circles", (e) => {
+        const f = e.features?.[0];
+        const coords = f?.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
+        if (!coords) return;
+        const name = String((f.properties as { name?: string } | undefined)?.name ?? "Объект из базы");
+        popupRef.current?.remove();
+        popupRef.current = new maplibregl.Popup({ offset: 12 }).setLngLat([coords[0], coords[1]]).setText(name).addTo(map);
       });
       map.addSource("overpass-pois", {
         type: "geojson",
@@ -626,10 +626,12 @@ export function RouteMapWidget() {
         .filter((item) => item.distance < 0.0018 * 0.0018)
         .sort((a, b) => a.distance - b.distance)
         .filter((item, idx, arr) => arr.findIndex((x) => Math.abs(x.progress - item.progress) < 0.06) === idx)
-        .slice(0, 18);
+        .slice(0, 8);
 
       const extraFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+      let sawRateLimit = false;
       for (const candidate of viaCandidates) {
+        if (sawRateLimit) break;
         if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
         const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
           method: "POST",
@@ -642,6 +644,10 @@ export function RouteMapWidget() {
           }),
         });
         const viaText = await viaRes.text();
+        if (viaRes.status === 429) {
+          sawRateLimit = true;
+          continue;
+        }
         if (!viaRes.ok || hasOrs2007(viaText)) continue;
         let viaData: OrsGeoJson;
         try {
@@ -687,6 +693,9 @@ export function RouteMapWidget() {
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
       setMsg(`Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.`);
+      if (sawRateLimit) {
+        setErr("Сервис маршрутов временно ограничил частоту запросов (429). Показаны доступные варианты без лишних догрузок.");
+      }
     } catch (e) {
       setErr(String(e));
     }
