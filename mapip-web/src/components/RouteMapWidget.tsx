@@ -75,6 +75,32 @@ function minSqDistToRoute(route: [number, number][], lat: number, lon: number): 
   return min;
 }
 
+function nearestRouteIndex(route: [number, number][], lat: number, lon: number): number {
+  if (!route.length) return -1;
+  let bestIdx = 0;
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < route.length; i += 1) {
+    const [rLat, rLon] = route[i];
+    const d = sqDist(rLat, rLon, lat, lon);
+    if (d < best) {
+      best = d;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+function objectTypeLabel(tags: Record<string, string> | undefined, fallback?: string): string {
+  if (!tags) return fallback || "Объект";
+  if (tags.ramp === "yes") return "Пандус";
+  if (tags.kerb) return `Бордюр (${tags.kerb})`;
+  if (tags.wheelchair) return `Доступность wheelchair: ${tags.wheelchair}`;
+  if (tags.highway === "steps") return "Лестница";
+  if (tags.amenity) return `Amenity: ${tags.amenity}`;
+  if (tags.tourism) return `Tourism: ${tags.tourism}`;
+  return fallback || "Объект";
+}
+
 function infraScoreForRoute(
   feature: GeoJSON.Feature<GeoJSON.LineString>,
   coreObjects: MapObject[],
@@ -132,6 +158,7 @@ export function RouteMapWidget() {
   const toMarkerRef = useRef<maplibregl.Marker | null>(null);
   const meMarkerRef = useRef<maplibregl.Marker | null>(null);
   const geoWatchIdRef = useRef<number | null>(null);
+  const popupRef = useRef<maplibregl.Popup | null>(null);
   const fromSuggestReqRef = useRef(0);
   const toSuggestReqRef = useRef(0);
   const fromSuggestTimerRef = useRef<number | null>(null);
@@ -218,6 +245,14 @@ export function RouteMapWidget() {
           "line-opacity": ["match", ["coalesce", ["get", "routeIndex"], 0], 0, 0.95, 1, 0.7, 2, 0.55, 0.5],
         },
       });
+      map.on("click", "core-objects-circles", (e) => {
+        const f = e.features?.[0];
+        const coords = f?.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
+        if (!coords) return;
+        const name = String((f.properties as { name?: string } | undefined)?.name ?? "Объект из базы");
+        popupRef.current?.remove();
+        popupRef.current = new maplibregl.Popup({ offset: 12 }).setLngLat([coords[0], coords[1]]).setText(name).addTo(map);
+      });
       map.addSource("core-objects", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -250,6 +285,27 @@ export function RouteMapWidget() {
           "circle-opacity": 0.9,
         },
       });
+      map.on("click", "overpass-pois-circles", (e) => {
+        const f = e.features?.[0];
+        const coords = f?.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
+        if (!coords) return;
+        const props = (f.properties as { label?: string; tags?: Record<string, string> } | undefined) ?? {};
+        const text = `${props.label ?? "Объект OSM"} — ${objectTypeLabel(props.tags, "инфраструктура")}`;
+        popupRef.current?.remove();
+        popupRef.current = new maplibregl.Popup({ offset: 12 }).setLngLat([coords[0], coords[1]]).setText(text).addTo(map);
+      });
+      map.on("mouseenter", "core-objects-circles", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "core-objects-circles", () => {
+        map.getCanvas().style.cursor = "";
+      });
+      map.on("mouseenter", "overpass-pois-circles", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "overpass-pois-circles", () => {
+        map.getCanvas().style.cursor = "";
+      });
     });
     map.on("click", (e) => {
       const point: [number, number] = [e.lngLat.lat, e.lngLat.lng];
@@ -268,6 +324,7 @@ export function RouteMapWidget() {
       fromMarkerRef.current?.remove();
       toMarkerRef.current?.remove();
       meMarkerRef.current?.remove();
+      popupRef.current?.remove();
       map.remove();
       mapRef.current = null;
     };
@@ -535,12 +592,15 @@ export function RouteMapWidget() {
       }
       const mainRoute = routeFeaturesRaw[0] ?? null;
       const mainRouteLatLon = mainRoute ? routeLatLonCoords(mainRoute) : [];
-      const coreCandidates = objects.map((obj) => ({
-        lat: obj.x,
-        lon: obj.y,
-        source: "core" as const,
-        distance: mainRouteLatLon.length ? minSqDistToRoute(mainRouteLatLon, obj.x, obj.y) : Number.POSITIVE_INFINITY,
-      }));
+      const hasOverpassCandidates = overpassFeatures.length > 0;
+      const coreCandidates = hasOverpassCandidates
+        ? objects.map((obj) => ({
+            lat: obj.x,
+            lon: obj.y,
+            source: "core" as const,
+            distance: mainRouteLatLon.length ? minSqDistToRoute(mainRouteLatLon, obj.x, obj.y) : Number.POSITIVE_INFINITY,
+          }))
+        : [];
       const overpassCandidates = overpassFeatures
         .map((poi) => {
           const coords = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
@@ -556,7 +616,16 @@ export function RouteMapWidget() {
         })
         .filter((x): x is { lat: number; lon: number; source: "overpass"; distance: number } => Boolean(x));
       const viaCandidates = [...coreCandidates, ...overpassCandidates]
+        .map((item) => {
+          const idx = nearestRouteIndex(mainRouteLatLon, item.lat, item.lon);
+          const progress = idx >= 0 && mainRouteLatLon.length > 1 ? idx / (mainRouteLatLon.length - 1) : 0;
+          return { ...item, routeIdx: idx, progress };
+        })
+        .filter((item) => item.routeIdx >= 0)
+        .filter((item) => item.progress > 0.15 && item.progress < 0.85)
+        .filter((item) => item.distance < 0.0018 * 0.0018)
         .sort((a, b) => a.distance - b.distance)
+        .filter((item, idx, arr) => arr.findIndex((x) => Math.abs(x.progress - item.progress) < 0.06) === idx)
         .slice(0, 18);
 
       const extraFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
