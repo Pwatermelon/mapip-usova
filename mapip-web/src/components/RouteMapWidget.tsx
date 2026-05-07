@@ -99,14 +99,87 @@ function nearestFootOnPolyline(
   return { lat: bestLat, lon: bestLon, distSq: bestSq, progress01: bestProgress01 };
 }
 
-/** Via: на коридоре маршрута, слегка к POI — не заставляет ORS «втыкаться» точно в узел объекта (аппендиксы). */
-function corridorViaFromPoi(route: [number, number][], poiLat: number, poiLon: number): [number, number] | null {
+/**
+ * Via на коридоре: чуть в сторону POI + лёгкое боковое смещение по варианту,
+ * чтобы альтернативы не схлопывались в одну линию.
+ */
+function corridorViaFromPoi(
+  route: [number, number][],
+  poiLat: number,
+  poiLon: number,
+  variant: number,
+): [number, number] | null {
   const foot = nearestFootOnPolyline(route, poiLat, poiLon);
   if (!foot) return null;
-  const towardPoiBias = 0.32;
-  const vLat = foot.lat + (poiLat - foot.lat) * towardPoiBias;
-  const vLon = foot.lon + (poiLon - foot.lon) * towardPoiBias;
+  const n = route.length;
+  const segIdx = Math.min(n - 2, Math.max(0, Math.floor(foot.progress01 * (n - 1))));
+  const [lat1, lon1] = route[segIdx];
+  const [lat2, lon2] = route[segIdx + 1] ?? [lat1, lon1];
+  const dx = lon2 - lon1;
+  const dy = lat2 - lat1;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1e-12;
+  const px = -dy / len;
+  const py = dx / len;
+  const lateralDeg = (0.00035 + variant * 0.00012) * (variant % 2 === 0 ? 1 : -1);
+  const towardBiases = [0.22, 0.34, 0.46];
+  const towardPoiBias = towardBiases[variant % towardBiases.length] ?? 0.3;
+  let vLat = foot.lat + (poiLat - foot.lat) * towardPoiBias;
+  let vLon = foot.lon + (poiLon - foot.lon) * towardPoiBias;
+  vLat += px * lateralDeg;
+  vLon += py * lateralDeg;
   return [vLat, vLon];
+}
+
+/** Грубое сравнение геометрии двух маршрутов (разная длина полилинии допускается). */
+function routesNearlyCoincident(
+  a: GeoJSON.Feature<GeoJSON.LineString>,
+  b: GeoJSON.Feature<GeoJSON.LineString>,
+): boolean {
+  const ca = a.geometry.coordinates ?? [];
+  const cb = b.geometry.coordinates ?? [];
+  if (ca.length < 2 || cb.length < 2) return true;
+  const samples = 12;
+  for (let i = 0; i < samples; i += 1) {
+    const t = i / (samples - 1);
+    const ia = Math.min(ca.length - 1, Math.round(t * (ca.length - 1)));
+    const ib = Math.min(cb.length - 1, Math.round(t * (cb.length - 1)));
+    const pa = ca[ia] as number[];
+    const pb = cb[ib] as number[];
+    const lonA = pa[0];
+    const latA = pa[1];
+    const lonB = pb[0];
+    const latB = pb[1];
+    if (Math.abs(latA - latB) > 0.00012 || Math.abs(lonA - lonB) > 0.00012) return false;
+  }
+  return true;
+}
+
+function stepObstaclePoints(overpass: GeoJSON.Feature[]): { lat: number; lon: number }[] {
+  const out: { lat: number; lon: number }[] = [];
+  for (const f of overpass) {
+    const tags = (f.properties as { tags?: Record<string, string> } | undefined)?.tags;
+    if (tags?.highway !== "steps") continue;
+    const c = f.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
+    if (!c || c.length < 2) continue;
+    out.push({ lat: c[1], lon: c[0] });
+  }
+  return out;
+}
+
+/** Для профиля wheelchair: маршрут проходит неприемлемо близко к лестнице (узел steps). */
+function routeUnacceptableNearSteps(
+  feature: GeoJSON.Feature<GeoJSON.LineString>,
+  steps: { lat: number; lon: number }[],
+  thresholdSq: number,
+): boolean {
+  if (!steps.length) return false;
+  const line = routeLatLonCoords(feature);
+  if (line.length < 2) return false;
+  for (const s of steps) {
+    const foot = nearestFootOnPolyline(line, s.lat, s.lon);
+    if (foot && foot.distSq < thresholdSq) return true;
+  }
+  return false;
 }
 
 function summaryDistanceMeters(feature: GeoJSON.Feature<GeoJSON.LineString>): number | null {
@@ -144,10 +217,14 @@ function infraScoreForRoute(
     if (!coords || coords.length < 2) continue;
     const poiLat = coords[1];
     const poiLon = coords[0];
+    const tags = (poi.properties as { tags?: Record<string, string> } | undefined)?.tags ?? {};
     const near = route.some(([lat, lon]) => sqDist(lat, lon, poiLat, poiLon) <= nearThresholdSq);
+    if (tags.highway === "steps") {
+      if (profile === "wheelchair" && near) score -= 220;
+      continue;
+    }
     if (!near) continue;
     score += 3;
-    const tags = (poi.properties as { tags?: Record<string, string> } | undefined)?.tags ?? {};
     if (profile === "wheelchair" && (tags.wheelchair || tags.ramp || tags.kerb)) score += 4;
   }
   return score;
@@ -581,7 +658,12 @@ export function RouteMapWidget() {
         setErr("Сервис маршрутов вернул не JSON (проверьте прокси /routing и ключ OPENROUTE_API_KEY).");
         return;
       }
-      const routeFeaturesRaw = routeFeaturesFromOrs(data);
+      const routeBasesAll = routeFeaturesFromOrs(data);
+      const routeFeaturesRaw: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+      for (const f of routeBasesAll) {
+        if (routeFeaturesRaw.some((x) => routesNearlyCoincident(x, f))) continue;
+        routeFeaturesRaw.push(f);
+      }
       const coords = lineCoordsFromOrs(data);
       if (map?.getLayer("route-line")) {
         map.setPaintProperty("route-line", "line-color", [
@@ -622,6 +704,8 @@ export function RouteMapWidget() {
       const corePts = hasOverpassCandidates ? objects.map((obj) => ({ lat: obj.x, lon: obj.y })) : [];
       const overpassPts = overpassFeatures
         .map((poi) => {
+          const tags = (poi.properties as { tags?: Record<string, string> } | undefined)?.tags;
+          if (requestProfile === "wheelchair" && tags?.highway === "steps") return null;
           const c = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
           if (!c || c.length < 2) return null;
           return { lat: c[1], lon: c[0] };
@@ -641,17 +725,20 @@ export function RouteMapWidget() {
         .filter((item, idx, arr) => arr.findIndex((x) => Math.abs(x.progress - item.progress) < 0.05) === idx)
         .slice(0, 8);
 
+      const stepHazardPoints = stepObstaclePoints(overpassFeatures);
+      const wheelchairStepsNearSq = 0.00042 * 0.00042;
+
       const extraFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       let sawRateLimit = false;
       const now = Date.now();
       const inRateLimitCooldown = now < altRateLimitUntilRef.current;
       const baseRouteMeters = mainRoute ? summaryDistanceMeters(mainRoute) : null;
-      const maxDetourRatio = 1.36;
+      const maxDetourRatio = 1.42;
       if (!inRateLimitCooldown) {
         for (const candidate of viaCandidates) {
           if (sawRateLimit) break;
           if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
-          const viaLL = corridorViaFromPoi(mainRouteLatLon, candidate.lat, candidate.lon);
+          const viaLL = corridorViaFromPoi(mainRouteLatLon, candidate.lat, candidate.lon, extraFeatures.length);
           if (!viaLL) continue;
           const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
             method: "POST",
@@ -687,16 +774,16 @@ export function RouteMapWidget() {
           ) {
             continue;
           }
-          const firstCoords = first.geometry.coordinates ?? [];
-          const duplicate = [...routeFeaturesRaw, ...extraFeatures].some((rf) => {
-            const c = rf.geometry.coordinates ?? [];
-            if (c.length !== firstCoords.length) return false;
-            if (!c.length) return true;
-            const a = c[Math.floor(c.length / 2)];
-            const b = firstCoords[Math.floor(firstCoords.length / 2)];
-            return Math.abs(a[0] - b[0]) < 0.00015 && Math.abs(a[1] - b[1]) < 0.00015;
-          });
-          if (duplicate) continue;
+          if (
+            requestProfile === "wheelchair" &&
+            routeUnacceptableNearSteps(first, stepHazardPoints, wheelchairStepsNearSq)
+          ) {
+            continue;
+          }
+          const dupGeom = [...routeFeaturesRaw, ...extraFeatures].some((rf) =>
+            routesNearlyCoincident(rf, first),
+          );
+          if (dupGeom) continue;
           extraFeatures.push(first);
         }
       }
@@ -722,7 +809,14 @@ export function RouteMapWidget() {
       const summary = (feat?.properties as { summary?: { distance?: number; duration?: number } })?.summary;
       const km = summary?.distance != null ? (summary.distance / 1000).toFixed(2) : "?";
       const min = summary?.duration != null ? Math.round(summary.duration / 60) : null;
-      setMsg(`Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.`);
+      const stairWarn =
+        requestProfile === "wheelchair" &&
+        ranked.length > 0 &&
+        stepHazardPoints.length > 0 &&
+        routeUnacceptableNearSteps(ranked[0], stepHazardPoints, wheelchairStepsNearSq);
+      setMsg(
+        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.${stairWarn ? " Внимание: выбранный путь проходит рядом с лестницей по данным OSM — перепроверьте участок." : ""}`,
+      );
       if (inRateLimitCooldown) {
         setErr("Сервис маршрутов ограничил частоту. Временный режим: строится базовый маршрут, альтернативы будут снова догружаться автоматически через ~1 минуту.");
       } else if (sawRateLimit) {
