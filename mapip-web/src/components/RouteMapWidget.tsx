@@ -10,6 +10,10 @@ const DEMO_OBJECTS: MapObject[] = [
   { id: 90003, x: 51.5402, y: 46.0418, display_name: "Ж/д вокзал (demo)" },
 ];
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function lineCoordsFromOrs(data: OrsGeoJson): number[][] {
   const out: number[][] = [];
   for (const f of data.features ?? []) {
@@ -312,6 +316,8 @@ export function RouteMapWidget() {
   const geoWatchIdRef = useRef<number | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const altRateLimitUntilRef = useRef(0);
+  const lastExtraDirectionsAtRef = useRef(0);
+  const buildInFlightRef = useRef(false);
   const fromSuggestReqRef = useRef(0);
   const toSuggestReqRef = useRef(0);
   const fromSuggestTimerRef = useRef<number | null>(null);
@@ -672,11 +678,14 @@ export function RouteMapWidget() {
   };
 
   const build = async () => {
+    if (buildInFlightRef.current) return;
+    buildInFlightRef.current = true;
     setErr(null);
     setMsg(null);
     const map = mapRef.current;
     if ((!fromQ.trim() && !useMyLocationRouting) || !toQ.trim()) {
       setErr("Укажите «Откуда» и «Куда».");
+      buildInFlightRef.current = false;
       return;
     }
     try {
@@ -698,6 +707,13 @@ export function RouteMapWidget() {
         }),
       });
       const text = await res.text();
+      if (res.status === 429) {
+        altRateLimitUntilRef.current = Date.now() + 120_000;
+        setErr(
+          "Слишком много запросов к сервису маршрутов (лимит OpenRouteService). Подождите 1–2 минуты или временно выберите меньше альтернатив.",
+        );
+        return;
+      }
       if (!res.ok || hasOrs2007(text)) {
         setErr(errorTextFromResponse(res, text));
         return;
@@ -778,7 +794,7 @@ export function RouteMapWidget() {
         .filter((item) => item.polyDistSq <= corridorThresholdSq)
         .sort((a, b) => a.polyDistSq - b.polyDistSq)
         .filter((item, idx, arr) => arr.findIndex((x) => Math.abs(x.progress - item.progress) < 0.05) === idx)
-        .slice(0, 8);
+        .slice(0, 3);
 
       const stepHazardPoints = stepObstaclePoints(overpassFeatures);
       const wheelchairStepsNearSq = 0.00042 * 0.00042;
@@ -790,9 +806,14 @@ export function RouteMapWidget() {
       const baseRouteMeters = mainRoute ? summaryDistanceMeters(mainRoute) : null;
       const maxDetourRatio = alternativeCount >= 3 ? 1.72 : 1.52;
 
+      const extraGapMs = 480;
+      lastExtraDirectionsAtRef.current = Date.now();
+
       const pushExtraFromVia = async (viaLL: [number, number]): Promise<boolean> => {
         if (inRateLimitCooldown) return false;
         if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) return true;
+        const since = Date.now() - lastExtraDirectionsAtRef.current;
+        if (since < extraGapMs) await delay(extraGapMs - since);
         const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -803,10 +824,11 @@ export function RouteMapWidget() {
             via: [viaLL],
           }),
         });
+        lastExtraDirectionsAtRef.current = Date.now();
         const viaText = await viaRes.text();
         if (viaRes.status === 429) {
           sawRateLimit = true;
-          altRateLimitUntilRef.current = Date.now() + 60_000;
+          altRateLimitUntilRef.current = Date.now() + 90_000;
           return false;
         }
         if (!viaRes.ok || hasOrs2007(viaText)) return false;
@@ -844,15 +866,15 @@ export function RouteMapWidget() {
           if (done) break;
         }
 
-        const progresses = [0.26, 0.38, 0.5, 0.62, 0.74];
-        const strengths = [1.05, 1.75, 2.55, 3.35];
+        const progresses = [0.32, 0.5, 0.68];
+        const strengths = [1.2, 2.8];
         const sides: (1 | -1)[] = [-1, 1];
         let corridorAttempts = 0;
         outerCorridor: for (const p of progresses) {
           for (const side of sides) {
             for (const st of strengths) {
               corridorAttempts += 1;
-              if (corridorAttempts > 28) break outerCorridor;
+              if (corridorAttempts > 12) break outerCorridor;
               if (sawRateLimit) break outerCorridor;
               if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break outerCorridor;
               const viaLL = viaAlongPolylineBias(mainRouteLatLon, p, side, st);
@@ -894,12 +916,14 @@ export function RouteMapWidget() {
         `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.${stairWarn ? " Внимание: выбранный путь проходит рядом с лестницей по данным OSM — перепроверьте участок." : ""}`,
       );
       if (inRateLimitCooldown) {
-        setErr("Сервис маршрутов ограничил частоту. Временный режим: строится базовый маршрут, альтернативы будут снова догружаться автоматически через ~1 минуту.");
+        setErr("Сервис маршрутов ограничил частоту. Временный режим: строится базовый маршрут, альтернативы снова можно будет догружать примерно через полторы минуты.");
       } else if (sawRateLimit) {
         setErr("Сервис маршрутов временно ограничил частоту запросов (429). Показаны доступные варианты без лишних догрузок.");
       }
     } catch (e) {
       setErr(String(e));
+    } finally {
+      buildInFlightRef.current = false;
     }
   };
 

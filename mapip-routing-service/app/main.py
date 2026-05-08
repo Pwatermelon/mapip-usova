@@ -130,6 +130,18 @@ async def _post_ors_points(profile: str, points: list[list[float]]) -> httpx.Res
     return await _post_ors(profile, {"coordinates": points})
 
 
+def _is_ors_rate_limited(r: httpx.Response) -> bool:
+    return r.status_code == 429
+
+
+def _raise_if_ors_rate_limited(r: httpx.Response) -> None:
+    if _is_ors_rate_limited(r):
+        raise HTTPException(
+            status_code=429,
+            detail="Превышен лимит запросов OpenRouteService. Подождите около минуты.",
+        )
+
+
 def _bbox_for_points(points: list[list[float]], pad: float = 0.01) -> tuple[float, float, float, float]:
     lons = [p[0] for p in points]
     lats = [p[1] for p in points]
@@ -303,7 +315,10 @@ async def _build_offset_alternatives(
     end: list[float],
     base_geo: dict[str, Any],
     need_count: int,
+    *,
+    max_ors_posts: int = 8,
 ) -> list[dict[str, Any]]:
+    """Добавить детур через смещённые точки на базовой линии; жёсткий потолок POST к ORS."""
     if need_count <= 0:
         return []
     out: list[dict[str, Any]] = []
@@ -311,20 +326,25 @@ async def _build_offset_alternatives(
     if len(base_line) < 2:
         return out
     n = len(base_line)
-    idxs = sorted({0, n // 4, n // 3, (2 * n) // 3, (3 * n) // 4, n - 1})
+    idxs = sorted({max(0, n // 4), n // 2, min(n - 1, (3 * n) // 4)})
     samples = [base_line[i] for i in idxs if 0 <= i < n]
     if len(samples) < 2:
         samples = [base_line[0], base_line[-1]]
-    offsets = [0.0012, -0.0012, 0.0024, -0.0024, 0.004, -0.004, 0.0065, -0.0065]
+    offsets = [0.0014, -0.0014, 0.004, -0.004]
+    posts = 0
+    cap = min(max_ors_posts, max(4, need_count * 3))
     for sample in samples:
-        if len(out) >= need_count:
+        if len(out) >= need_count or posts >= cap:
             break
         sx, sy = float(sample[0]), float(sample[1])
         for delta in offsets:
-            if len(out) >= need_count:
+            if len(out) >= need_count or posts >= cap:
                 break
             via = [sx + delta, sy - delta * 0.85]
             r_via = await _post_ors_points(profile, [start, via, end])
+            posts += 1
+            if _is_ors_rate_limited(r_via):
+                return out
             if not r_via.is_success or _has_ors_2007(r_via.text):
                 continue
             try:
@@ -454,6 +474,8 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         # Для маршрута через конкретные объекты строим один детерминированный путь.
         alt = 1
 
+    poi_via_limit = min(5, alt + 2)
+
     if alt > 1:
         payload: dict[str, Any] = {
             "coordinates": coordinates,
@@ -462,10 +484,13 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             },
         }
         r = await _post_ors(profile, payload)
+        _raise_if_ors_rate_limited(r)
         if not r.is_success or _has_unknown_alternative_routes(r.text):
             r = await _post_ors(profile, {"coordinates": coordinates})
+            _raise_if_ors_rate_limited(r)
     else:
         r = await _post_ors(profile, {"coordinates": coordinates})
+        _raise_if_ors_rate_limited(r)
 
     if _has_ors_2007(r.text):
         # У ORS иногда code 2007; пробуем совместимые профили.
@@ -473,6 +498,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             if fallback_profile == profile:
                 continue
             r = await _post_ors(fallback_profile, {"coordinates": coordinates})
+            _raise_if_ors_rate_limited(r)
             if r.is_success and not _has_ors_2007(r.text):
                 break
 
@@ -482,19 +508,23 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         if alt > 1:
             fallback_payload["options"] = {"alternative_routes": {"target_count": alt, "weight_factor": 1.82}}
         r_json = await _post_ors_json_geo(profile, fallback_payload)
+        _raise_if_ors_rate_limited(r_json)
         if (_has_unknown_alternative_routes(r_json.text) and alt > 1) or (
             not r_json.is_success and alt > 1
         ):
             r_json = await _post_ors_json_geo(profile, {"coordinates": coordinates})
+            _raise_if_ors_rate_limited(r_json)
         if _has_ors_2007(r_json.text) or not r_json.is_success:
             for fallback_profile in ("foot-walking", "driving-car"):
                 if fallback_profile == profile:
                     continue
                 r_json = await _post_ors_json_geo(fallback_profile, fallback_payload)
+                _raise_if_ors_rate_limited(r_json)
                 if (_has_unknown_alternative_routes(r_json.text) and alt > 1) or (
                     not r_json.is_success and alt > 1
                 ):
                     r_json = await _post_ors_json_geo(fallback_profile, {"coordinates": coordinates})
+                    _raise_if_ors_rate_limited(r_json)
                 if r_json.is_success and not _has_ors_2007(r_json.text):
                     break
         if not r_json.is_success or _has_ors_2007(r_json.text):
@@ -511,13 +541,15 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             max_lon=max_lon,
             max_lat=max_lat,
             profile=profile,
-            limit=max(8, alt * 3),
+            limit=poi_via_limit,
         )
         routes: list[dict[str, Any]] = [main_geo]
         for via in candidates:
             if len(routes) >= alt:
                 break
             r_via = await _post_ors_points(profile, [coordinates[0], via, coordinates[1]])
+            if _is_ors_rate_limited(r_via):
+                break
             if not r_via.is_success or _has_ors_2007(r_via.text):
                 continue
             try:
@@ -551,13 +583,15 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         max_lon=max_lon,
         max_lat=max_lat,
         profile=profile,
-        limit=max(8, alt * 3),
+        limit=poi_via_limit,
     )
     routes: list[dict[str, Any]] = [base_geo]
     for via in candidates:
         if have + len(routes) - 1 >= alt:
             break
         r_via = await _post_ors_points(profile, [coordinates[0], via, coordinates[1]])
+        if _is_ors_rate_limited(r_via):
+            break
         if not r_via.is_success or _has_ors_2007(r_via.text):
             continue
         try:
