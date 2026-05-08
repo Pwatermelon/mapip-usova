@@ -156,6 +156,8 @@ async def _fetch_accessibility_candidates(
     profile: str,
     limit: int,
 ) -> list[list[float]]:
+    if limit <= 0:
+        return []
     if profile == "wheelchair":
         clauses = """
           node["wheelchair"]({min_lat},{min_lon},{max_lat},{max_lon});
@@ -474,7 +476,8 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         # Для маршрута через конкретные объекты строим один детерминированный путь.
         alt = 1
 
-    poi_via_limit = min(5, alt + 2)
+    # Не догружаем альтернативы через лишние POST к ORS (квота). Отдаём то, что вернул один запрос с alternative_routes.
+    poi_via_limit = 0
 
     if alt > 1:
         payload: dict[str, Any] = {
@@ -565,6 +568,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
                 end=coordinates[1],
                 base_geo=main_geo,
                 need_count=alt - len(routes),
+                max_ors_posts=0,
             )
             routes.extend(extras)
         return _merge_geojson_features(routes[:alt])
@@ -607,6 +611,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             end=coordinates[1],
             base_geo=base_geo,
             need_count=alt - len(routes),
+            max_ors_posts=0,
         )
         routes.extend(extras)
     return _merge_geojson_features(routes[:alt])

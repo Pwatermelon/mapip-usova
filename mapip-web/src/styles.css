@@ -262,6 +262,15 @@ button.btn-sm {
   font-size: 0.85rem;
 }
 
+.map-layout .field .btn-sm {
+  margin-top: 0.5rem;
+}
+
+button.btn-nav-active {
+  box-shadow: 0 0 0 2px #fbbf24;
+  background: linear-gradient(135deg, #0ea5e9, #0369a1);
+}
+
 button.btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -465,7 +474,7 @@ body {
 
 .legacy-hero {
   display: grid;
-  grid-template-columns: 90px 1fr auto;
+  grid-template-columns: 120px 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 8px 20px;
@@ -478,9 +487,12 @@ body {
   text-align: center;
 }
 
+/* Как в AccessibleRecommend: Dostupnaya_sreda.png — ширина ~100px */
 .legacy-logo-image {
-  width: 64px;
+  width: 100px;
   height: auto;
+  max-height: 80px;
+  object-fit: contain;
   margin-left: 0;
 }
 

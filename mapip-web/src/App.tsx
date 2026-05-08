@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { LoginModal } from "./components/LoginModal";
-import legacyLogo from "./assets/legacy-logo.svg";
+import legacyLogo from "./assets/legacy-logo.png";
 import { AboutPage } from "./pages/AboutPage";
 import { AddInfoPage } from "./pages/AddInfoPage";
 import { EmbedRouterPage } from "./pages/EmbedRouterPage";
@@ -82,7 +82,7 @@ export default function App() {
         element={
           <div className="app-shell">
             <header className="legacy-hero">
-              <img src={legacyLogo} className="legacy-logo-image" alt="Логотип MAPIP" />
+              <img src={legacyLogo} className="legacy-logo-image" alt="Доступная среда — логотип проекта" />
               <h1 className="legacy-title">Сделаем с Вами мир доступнее</h1>
               <HeaderAuth impairedMode={impairedMode} onToggleImpaired={toggleImpaired} />
             </header>

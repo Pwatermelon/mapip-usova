@@ -10,10 +10,6 @@ const DEMO_OBJECTS: MapObject[] = [
   { id: 90003, x: 51.5402, y: 46.0418, display_name: "Ж/д вокзал (demo)" },
 ];
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 function lineCoordsFromOrs(data: OrsGeoJson): number[][] {
   const out: number[][] = [];
   for (const f of data.features ?? []) {
@@ -103,37 +99,6 @@ function nearestFootOnPolyline(
   return { lat: bestLat, lon: bestLon, distSq: bestSq, progress01: bestProgress01 };
 }
 
-/**
- * Via на коридоре: чуть в сторону POI + лёгкое боковое смещение по варианту,
- * чтобы альтернативы не схлопывались в одну линию.
- */
-function corridorViaFromPoi(
-  route: [number, number][],
-  poiLat: number,
-  poiLon: number,
-  variant: number,
-): [number, number] | null {
-  const foot = nearestFootOnPolyline(route, poiLat, poiLon);
-  if (!foot) return null;
-  const n = route.length;
-  const segIdx = Math.min(n - 2, Math.max(0, Math.floor(foot.progress01 * (n - 1))));
-  const [lat1, lon1] = route[segIdx];
-  const [lat2, lon2] = route[segIdx + 1] ?? [lat1, lon1];
-  const dx = lon2 - lon1;
-  const dy = lat2 - lat1;
-  const len = Math.sqrt(dx * dx + dy * dy) || 1e-12;
-  const px = -dy / len;
-  const py = dx / len;
-  const lateralDeg = (0.00028 + (variant % 3) * 0.0001) * (variant % 2 === 0 ? 1 : -1);
-  const towardBiases = [0.08, 0.11, 0.14];
-  const towardPoiBias = towardBiases[variant % towardBiases.length] ?? 0.1;
-  let vLat = foot.lat + (poiLat - foot.lat) * towardPoiBias;
-  let vLon = foot.lon + (poiLon - foot.lon) * towardPoiBias;
-  vLat += px * lateralDeg;
-  vLon += py * lateralDeg;
-  return [vLat, vLon];
-}
-
 /** Приблизительное расстояние между двумя точками в метрах (плоская аппроксимация). */
 function metersApprox(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const dLat = (lat2 - lat1) * 111320;
@@ -183,32 +148,6 @@ function isTooSimilarRoute(
   return existing.some((ex) => isAlmostFullOverlap(candidate, ex));
 }
 
-/** Via на полилине базового маршрута со сносом вбок (~60–140 м по графу после OSM-снапа) — без «заезда» в объект. */
-function viaAlongPolylineBias(
-  route: [number, number][],
-  progress01: number,
-  lateralSign: 1 | -1,
-  lateralStrength: number,
-): [number, number] | null {
-  if (route.length < 2) return null;
-  const n = route.length;
-  const f = Math.max(0, Math.min(1, progress01)) * (n - 1);
-  const i = Math.min(n - 2, Math.floor(f));
-  const tt = Math.max(0, Math.min(1, f - i));
-  const [lat1, lon1] = route[i];
-  const [lat2, lon2] = route[i + 1];
-  const lat = lat1 + (lat2 - lat1) * tt;
-  const lon = lon1 + (lon2 - lon1) * tt;
-  const dx = lon2 - lon1;
-  const dy = lat2 - lat1;
-  const len = Math.sqrt(dx * dx + dy * dy) || 1e-12;
-  const px = (-dy / len) * lateralSign;
-  const py = (dx / len) * lateralSign;
-  const latDeg = 0.00042 * lateralStrength;
-  const lonDeg = 0.00062 * lateralStrength;
-  return [lat + px * latDeg, lon + py * lonDeg];
-}
-
 function stepObstaclePoints(overpass: GeoJSON.Feature[]): { lat: number; lon: number }[] {
   const out: { lat: number; lon: number }[] = [];
   for (const f of overpass) {
@@ -235,11 +174,6 @@ function routeUnacceptableNearSteps(
     if (foot && foot.distSq < thresholdSq) return true;
   }
   return false;
-}
-
-function summaryDistanceMeters(feature: GeoJSON.Feature<GeoJSON.LineString>): number | null {
-  const s = (feature.properties as { summary?: { distance?: number } } | undefined)?.summary?.distance;
-  return typeof s === "number" && Number.isFinite(s) ? s : null;
 }
 
 function objectTypeLabel(tags: Record<string, string> | undefined, fallback?: string): string {
@@ -316,8 +250,8 @@ export function RouteMapWidget() {
   const geoWatchIdRef = useRef<number | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const altRateLimitUntilRef = useRef(0);
-  const lastExtraDirectionsAtRef = useRef(0);
   const buildInFlightRef = useRef(false);
+  const mapPickModeRef = useRef<"from" | "to" | null>(null);
   const fromSuggestReqRef = useRef(0);
   const toSuggestReqRef = useRef(0);
   const fromSuggestTimerRef = useRef<number | null>(null);
@@ -337,6 +271,9 @@ export function RouteMapWidget() {
   const [toPoint, setToPoint] = useState<[number, number] | null>(null);
   const [myPoint, setMyPoint] = useState<[number, number] | null>(null);
   const [useMyLocationRouting, setUseMyLocationRouting] = useState(false);
+  const [mapPickMode, setMapPickMode] = useState<"from" | "to" | null>(null);
+
+  mapPickModeRef.current = mapPickMode;
 
   useEffect(() => {
     fromPointRef.current = fromPoint;
@@ -420,14 +357,6 @@ export function RouteMapWidget() {
           "circle-opacity": 0.85,
         },
       });
-      map.on("click", "core-objects-circles", (e) => {
-        const f = e.features?.[0];
-        const coords = f?.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
-        if (!coords) return;
-        const name = String((f.properties as { name?: string } | undefined)?.name ?? "Объект из базы");
-        popupRef.current?.remove();
-        popupRef.current = new maplibregl.Popup({ offset: 12 }).setLngLat([coords[0], coords[1]]).setText(name).addTo(map);
-      });
       map.addSource("overpass-pois", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -444,40 +373,57 @@ export function RouteMapWidget() {
           "circle-opacity": 0.9,
         },
       });
-      map.on("click", "overpass-pois-circles", (e) => {
-        const f = e.features?.[0];
-        const coords = f?.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
-        if (!coords) return;
-        const props = (f.properties as { label?: string; tags?: Record<string, string> } | undefined) ?? {};
-        const text = `${props.label ?? "Объект OSM"} — ${objectTypeLabel(props.tags, "инфраструктура")}`;
-        popupRef.current?.remove();
-        popupRef.current = new maplibregl.Popup({ offset: 12 }).setLngLat([coords[0], coords[1]]).setText(text).addTo(map);
-      });
       map.on("mouseenter", "core-objects-circles", () => {
         map.getCanvas().style.cursor = "pointer";
       });
       map.on("mouseleave", "core-objects-circles", () => {
-        map.getCanvas().style.cursor = "";
+        if (!mapPickModeRef.current) map.getCanvas().style.cursor = "";
       });
       map.on("mouseenter", "overpass-pois-circles", () => {
         map.getCanvas().style.cursor = "pointer";
       });
       map.on("mouseleave", "overpass-pois-circles", () => {
-        map.getCanvas().style.cursor = "";
+        if (!mapPickModeRef.current) map.getCanvas().style.cursor = "";
       });
-    });
-    map.on("click", (e) => {
-      const point: [number, number] = [e.lngLat.lat, e.lngLat.lng];
-      const text = `${point[0].toFixed(6)}, ${point[1].toFixed(6)}`;
-      if (!fromPointRef.current || (fromPointRef.current && toPointRef.current)) {
-        setFromPoint(point);
-        setToPoint(null);
-        setFromQ(text);
-        setToQ("");
-      } else {
-        setToPoint(point);
-        setToQ(text);
-      }
+
+      map.on("click", (e) => {
+        const poiLayers = ["core-objects-circles", "overpass-pois-circles"];
+        const hits = map.queryRenderedFeatures(e.point, { layers: poiLayers });
+        if (hits.length > 0) {
+          const f = hits[0];
+          const coords = f.geometry?.type === "Point" ? (f.geometry.coordinates as number[]) : null;
+          if (!coords) return;
+          popupRef.current?.remove();
+          if (f.layer?.id === "core-objects-circles") {
+            const name = String((f.properties as { name?: string } | undefined)?.name ?? "Объект из базы");
+            popupRef.current = new maplibregl.Popup({ offset: 12 })
+              .setLngLat([coords[0], coords[1]])
+              .setText(name)
+              .addTo(map);
+          } else {
+            const props = (f.properties as { label?: string; tags?: Record<string, string> } | undefined) ?? {};
+            const text = `${props.label ?? "Объект OSM"} — ${objectTypeLabel(props.tags, "инфраструктура")}`;
+            popupRef.current = new maplibregl.Popup({ offset: 12 })
+              .setLngLat([coords[0], coords[1]])
+              .setText(text)
+              .addTo(map);
+          }
+          return;
+        }
+        const pick = mapPickModeRef.current;
+        if (!pick) return;
+        const point: [number, number] = [e.lngLat.lat, e.lngLat.lng];
+        const text = `${point[0].toFixed(6)}, ${point[1].toFixed(6)}`;
+        if (pick === "from") {
+          setFromPoint(point);
+          setFromQ(text);
+          setMapPickMode(null);
+        } else {
+          setToPoint(point);
+          setToQ(text);
+          setMapPickMode(null);
+        }
+      });
     });
     return () => {
       fromMarkerRef.current?.remove();
@@ -598,6 +544,12 @@ export function RouteMapWidget() {
     };
   }, []);
 
+  useEffect(() => {
+    const el = mapRef.current?.getCanvas();
+    if (!el) return;
+    el.style.cursor = mapPickMode ? "crosshair" : "";
+  }, [mapPickMode]);
+
   const parseLatLon = (value: string): [number, number] | null => {
     const m = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)$/);
     if (!m) return null;
@@ -692,6 +644,7 @@ export function RouteMapWidget() {
       const fromCoord = useMyLocationRouting ? myPoint : await resolvePoint(fromQ, fromPoint);
       if (!fromCoord) {
         setErr("Текущее местоположение еще не определено.");
+        buildInFlightRef.current = false;
         return;
       }
       const toCoord = await resolvePoint(toQ, toPoint);
@@ -765,128 +718,13 @@ export function RouteMapWidget() {
           });
         }
       }
-      const mainRoute = routeFeaturesRaw[0] ?? null;
-      const mainRouteLatLon = mainRoute ? routeLatLonCoords(mainRoute) : [];
-      const hasOverpassCandidates = overpassFeatures.length > 0;
-      const corridorThresholdSq = 0.0022 * 0.0022;
-      const corePts =
-        alternativeCount > 1 && (hasOverpassCandidates || objects.length > 0)
-          ? objects.map((obj) => ({ lat: obj.x, lon: obj.y }))
-          : [];
-      const overpassPts = overpassFeatures
-        .map((poi) => {
-          const tags = (poi.properties as { tags?: Record<string, string> } | undefined)?.tags;
-          if (requestProfile === "wheelchair" && tags?.highway === "steps") return null;
-          const c = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
-          if (!c || c.length < 2) return null;
-          return { lat: c[1], lon: c[0] };
-        })
-        .filter((x): x is { lat: number; lon: number } => Boolean(x));
-      const viaCandidates = [...corePts, ...overpassPts]
-        .map((item) => {
-          if (!mainRouteLatLon.length) return null;
-          const foot = nearestFootOnPolyline(mainRouteLatLon, item.lat, item.lon);
-          if (!foot) return null;
-          return { ...item, progress: foot.progress01, polyDistSq: foot.distSq };
-        })
-        .filter((x): x is { lat: number; lon: number; progress: number; polyDistSq: number } => Boolean(x))
-        .filter((item) => item.progress > 0.12 && item.progress < 0.88)
-        .filter((item) => item.polyDistSq <= corridorThresholdSq)
-        .sort((a, b) => a.polyDistSq - b.polyDistSq)
-        .filter((item, idx, arr) => arr.findIndex((x) => Math.abs(x.progress - item.progress) < 0.05) === idx)
-        .slice(0, 3);
-
       const stepHazardPoints = stepObstaclePoints(overpassFeatures);
       const wheelchairStepsNearSq = 0.00042 * 0.00042;
 
-      const extraFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-      let sawRateLimit = false;
       const now = Date.now();
       const inRateLimitCooldown = now < altRateLimitUntilRef.current;
-      const baseRouteMeters = mainRoute ? summaryDistanceMeters(mainRoute) : null;
-      const maxDetourRatio = alternativeCount >= 3 ? 1.72 : 1.52;
 
-      const extraGapMs = 480;
-      lastExtraDirectionsAtRef.current = Date.now();
-
-      const pushExtraFromVia = async (viaLL: [number, number]): Promise<boolean> => {
-        if (inRateLimitCooldown) return false;
-        if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) return true;
-        const since = Date.now() - lastExtraDirectionsAtRef.current;
-        if (since < extraGapMs) await delay(extraGapMs - since);
-        const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            from: fromCoord,
-            to: toCoord,
-            profile: requestProfile,
-            via: [viaLL],
-          }),
-        });
-        lastExtraDirectionsAtRef.current = Date.now();
-        const viaText = await viaRes.text();
-        if (viaRes.status === 429) {
-          sawRateLimit = true;
-          altRateLimitUntilRef.current = Date.now() + 90_000;
-          return false;
-        }
-        if (!viaRes.ok || hasOrs2007(viaText)) return false;
-        let viaData: OrsGeoJson;
-        try {
-          viaData = JSON.parse(viaText) as OrsGeoJson;
-        } catch {
-          return false;
-        }
-        const viaFeatures = routeFeaturesFromOrs(viaData);
-        const first = viaFeatures[0];
-        if (!first) return false;
-        const altMeters = summaryDistanceMeters(first);
-        if (baseRouteMeters != null && altMeters != null && altMeters > baseRouteMeters * maxDetourRatio) {
-          return false;
-        }
-        if (
-          requestProfile === "wheelchair" &&
-          routeUnacceptableNearSteps(first, stepHazardPoints, wheelchairStepsNearSq)
-        ) {
-          return false;
-        }
-        if (isTooSimilarRoute(first, [...routeFeaturesRaw, ...extraFeatures])) return false;
-        extraFeatures.push(first);
-        return routeFeaturesRaw.length + extraFeatures.length >= alternativeCount;
-      };
-
-      if (!inRateLimitCooldown) {
-        for (const candidate of viaCandidates) {
-          if (sawRateLimit) break;
-          if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break;
-          const viaLL = corridorViaFromPoi(mainRouteLatLon, candidate.lat, candidate.lon, extraFeatures.length);
-          if (!viaLL) continue;
-          const done = await pushExtraFromVia(viaLL);
-          if (done) break;
-        }
-
-        const progresses = [0.32, 0.5, 0.68];
-        const strengths = [1.2, 2.8];
-        const sides: (1 | -1)[] = [-1, 1];
-        let corridorAttempts = 0;
-        outerCorridor: for (const p of progresses) {
-          for (const side of sides) {
-            for (const st of strengths) {
-              corridorAttempts += 1;
-              if (corridorAttempts > 12) break outerCorridor;
-              if (sawRateLimit) break outerCorridor;
-              if (routeFeaturesRaw.length + extraFeatures.length >= alternativeCount) break outerCorridor;
-              const viaLL = viaAlongPolylineBias(mainRouteLatLon, p, side, st);
-              if (!viaLL) continue;
-              const done = await pushExtraFromVia(viaLL);
-              if (done) break outerCorridor;
-            }
-          }
-        }
-      }
-
-      const allRouteFeatures = [...routeFeaturesRaw, ...extraFeatures].slice(0, alternativeCount);
+      const allRouteFeatures = routeFeaturesRaw.slice(0, alternativeCount);
       const ranked = [...allRouteFeatures]
         .map((f) => ({ feature: f, score: infraScoreForRoute(f, objects, overpassFeatures, requestProfile) }))
         .sort((a, b) => b.score - a.score)
@@ -912,13 +750,17 @@ export function RouteMapWidget() {
         ranked.length > 0 &&
         stepHazardPoints.length > 0 &&
         routeUnacceptableNearSteps(ranked[0], stepHazardPoints, wheelchairStepsNearSq);
+      const altHint =
+        alternativeCount > 1 && ranked.length < alternativeCount
+          ? " Сервис мог вернуть меньше линий, чем запрошено — без сотен лишних запросов к API."
+          : "";
       setMsg(
-        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.${stairWarn ? " Внимание: выбранный путь проходит рядом с лестницей по данным OSM — перепроверьте участок." : ""}`,
+        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.${altHint}${stairWarn ? " Внимание: выбранный путь проходит рядом с лестницей по данным OSM — перепроверьте участок." : ""}`,
       );
       if (inRateLimitCooldown) {
-        setErr("Сервис маршрутов ограничил частоту. Временный режим: строится базовый маршрут, альтернативы снова можно будет догружать примерно через полторы минуты.");
-      } else if (sawRateLimit) {
-        setErr("Сервис маршрутов временно ограничил частоту запросов (429). Показаны доступные варианты без лишних догрузок.");
+        setErr(
+          "Недавно срабатывал лимит запросов к маршрутам. Подождите немного и постройте снова — сейчас все альтернативы приходят одним запросом к сервису.",
+        );
       }
     } catch (e) {
       setErr(String(e));
@@ -968,6 +810,14 @@ export function RouteMapWidget() {
               ))}
             </div>
           )}
+          <button
+            type="button"
+            className={`btn btn-sm ${mapPickMode === "from" ? "btn-nav-active" : ""}`}
+            disabled={useMyLocationRouting}
+            onClick={() => setMapPickMode((m) => (m === "from" ? null : "from"))}
+          >
+            {useMyLocationRouting ? "Откуда: геолокация" : mapPickMode === "from" ? "Кликните по карте для старта…" : "Указать «Откуда» на карте"}
+          </button>
         </div>
         <div className="field">
           <label>Куда</label>
@@ -1001,8 +851,17 @@ export function RouteMapWidget() {
               ))}
             </div>
           )}
+          <button
+            type="button"
+            className={`btn btn-sm ${mapPickMode === "to" ? "btn-nav-active" : ""}`}
+            onClick={() => setMapPickMode((m) => (m === "to" ? null : "to"))}
+          >
+            {mapPickMode === "to" ? "Кликните по карте для финиша…" : "Указать «Куда» на карте"}
+          </button>
         </div>
-        <p className="muted small">Можно кликнуть по карте: первый клик — старт, второй — финиш.</p>
+        <p className="muted small">
+          Клик по слоям карты (синие и оранжевые точки) — подсказка об объекте. Точки маршрута на карте ставятся только после нажатия кнопок выше.
+        </p>
         <label className="muted small" style={{ display: "block", marginBottom: 8 }}>
           <input
             type="checkbox"
