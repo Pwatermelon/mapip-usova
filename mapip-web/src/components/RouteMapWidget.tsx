@@ -148,6 +148,52 @@ function isTooSimilarRoute(
   return existing.some((ex) => isAlmostFullOverlap(candidate, ex));
 }
 
+function offsetPointMeters(
+  lat: number,
+  lon: number,
+  pX: number,
+  pY: number,
+  offsetMeters: number,
+): [number, number] {
+  const latRad = (lat * Math.PI) / 180;
+  const dLat = (pY * offsetMeters) / 111320;
+  const dLon = (pX * offsetMeters) / Math.max(111320 * Math.cos(latRad), 1e-6);
+  return [lat + dLat, lon + dLon];
+}
+
+/** Локальный fallback: если ORS вернул меньше линий, добираем визуальные альтернативы до нужного числа. */
+function buildVisualFallbackAlternatives(
+  base: GeoJSON.Feature<GeoJSON.LineString>,
+  needCount: number,
+): GeoJSON.Feature<GeoJSON.LineString>[] {
+  if (needCount <= 0) return [];
+  const src = routeLatLonCoords(base);
+  if (src.length < 2) return [];
+  const out: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+  const offsets = [32, -32, 58, -58, 76, -76];
+  for (const shiftM of offsets) {
+    if (out.length >= needCount) break;
+    const shifted: [number, number][] = src.map((pt, i) => {
+      const prev = src[Math.max(0, i - 1)];
+      const next = src[Math.min(src.length - 1, i + 1)];
+      const refLat = (prev[0] + next[0]) / 2;
+      const dxM = (next[1] - prev[1]) * 111320 * Math.cos((refLat * Math.PI) / 180);
+      const dyM = (next[0] - prev[0]) * 111320;
+      const len = Math.sqrt(dxM * dxM + dyM * dyM);
+      if (len < 1e-6) return pt;
+      const pX = -dyM / len;
+      const pY = dxM / len;
+      return offsetPointMeters(pt[0], pt[1], pX, pY, shiftM);
+    });
+    out.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: shifted.map(([lat, lon]) => [lon, lat]) },
+      properties: { ...(base.properties ?? {}), synthetic: true },
+    });
+  }
+  return out;
+}
+
 function stepObstaclePoints(overpass: GeoJSON.Feature[]): { lat: number; lon: number }[] {
   const out: { lat: number; lon: number }[] = [];
   for (const f of overpass) {
@@ -215,6 +261,31 @@ function infraScoreForRoute(
     if (!near) continue;
     score += 3;
     if (profile === "wheelchair" && (tags.wheelchair || tags.ramp || tags.kerb)) score += 4;
+  }
+  return score;
+}
+
+/** Сколько overpass-объектов маршрут реально «накрывает» (главный критерий цвета). */
+function overpassCoverageScore(
+  feature: GeoJSON.Feature<GeoJSON.LineString>,
+  overpass: GeoJSON.Feature[],
+  profile: string,
+): number {
+  const route = routeLatLonCoords(feature);
+  if (route.length < 2 || !overpass.length) return 0;
+  const nearThresholdSq = 0.0012 * 0.0012; // ~130m
+  let score = 0;
+  for (const poi of overpass) {
+    const coords = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
+    if (!coords || coords.length < 2) continue;
+    const poiLat = coords[1];
+    const poiLon = coords[0];
+    const tags = (poi.properties as { tags?: Record<string, string> } | undefined)?.tags ?? {};
+    if (profile === "wheelchair" && tags.highway === "steps") continue;
+    const near = route.some(([lat, lon]) => sqDist(lat, lon, poiLat, poiLon) <= nearThresholdSq);
+    if (!near) continue;
+    score += 1;
+    if (profile === "wheelchair" && (tags.wheelchair || tags.ramp || tags.kerb)) score += 1;
   }
   return score;
 }
@@ -724,11 +795,86 @@ export function RouteMapWidget() {
       const now = Date.now();
       const inRateLimitCooldown = now < altRateLimitUntilRef.current;
 
+      if (!inRateLimitCooldown && routeFeaturesRaw.length > 0 && routeFeaturesRaw.length < alternativeCount) {
+        const mainRoute = routeFeaturesRaw[0];
+        const mainLine = routeLatLonCoords(mainRoute);
+        const viaCandidates = overpassFeatures
+          .map((poi) => {
+            const c = poi.geometry?.type === "Point" ? (poi.geometry.coordinates as number[]) : null;
+            if (!c || c.length < 2) return null;
+            const lat = c[1];
+            const lon = c[0];
+            const foot = nearestFootOnPolyline(mainLine, lat, lon);
+            if (!foot) return null;
+            return { lat, lon, progress: foot.progress01, distSq: foot.distSq };
+          })
+          .filter((x): x is { lat: number; lon: number; progress: number; distSq: number } => Boolean(x))
+          .filter((x) => x.progress > 0.1 && x.progress < 0.9)
+          .sort((a, b) => a.distSq - b.distSq)
+          .filter((x, idx, arr) => arr.findIndex((y) => Math.abs(y.progress - x.progress) < 0.06) === idx)
+          .slice(0, 8);
+
+        for (const via of viaCandidates) {
+          if (routeFeaturesRaw.length >= alternativeCount) break;
+          const viaRes = await fetch(`${routingBase}/v1/directions/geojson`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              from: fromCoord,
+              to: toCoord,
+              profile: requestProfile,
+              via: [[via.lat, via.lon]],
+            }),
+          });
+          const viaText = await viaRes.text();
+          if (viaRes.status === 429) {
+            altRateLimitUntilRef.current = Date.now() + 60_000;
+            break;
+          }
+          if (!viaRes.ok || hasOrs2007(viaText)) continue;
+          let viaData: OrsGeoJson;
+          try {
+            viaData = JSON.parse(viaText) as OrsGeoJson;
+          } catch {
+            continue;
+          }
+          const cand = routeFeaturesFromOrs(viaData)[0];
+          if (!cand) continue;
+          if (
+            requestProfile === "wheelchair" &&
+            routeUnacceptableNearSteps(cand, stepHazardPoints, wheelchairStepsNearSq)
+          ) {
+            continue;
+          }
+          if (isTooSimilarRoute(cand, routeFeaturesRaw)) continue;
+          routeFeaturesRaw.push(cand);
+        }
+      }
+
+      if (routeFeaturesRaw.length > 0 && routeFeaturesRaw.length < alternativeCount) {
+        const fallback = buildVisualFallbackAlternatives(
+          routeFeaturesRaw[0],
+          alternativeCount - routeFeaturesRaw.length,
+        );
+        for (const f of fallback) {
+          if (routeFeaturesRaw.length >= alternativeCount) break;
+          if (isTooSimilarRoute(f, routeFeaturesRaw)) continue;
+          routeFeaturesRaw.push(f);
+        }
+      }
+
       const allRouteFeatures = routeFeaturesRaw.slice(0, alternativeCount);
       const ranked = [...allRouteFeatures]
-        .map((f) => ({ feature: f, score: infraScoreForRoute(f, objects, overpassFeatures, requestProfile) }))
-        .sort((a, b) => b.score - a.score)
-        .map((row, idx) => ({ ...row.feature, properties: { ...(row.feature.properties ?? {}), routeIndex: idx, infraScore: row.score } }))
+        .map((f) => ({
+          feature: f,
+          overpassScore: overpassCoverageScore(f, overpassFeatures, requestProfile),
+          infraScore: infraScoreForRoute(f, objects, overpassFeatures, requestProfile),
+        }))
+        .sort((a, b) => b.overpassScore - a.overpassScore || b.infraScore - a.infraScore)
+        .map((row, idx) => ({
+          ...row.feature,
+          properties: { ...(row.feature.properties ?? {}), routeIndex: idx, infraScore: row.infraScore, overpassScore: row.overpassScore },
+        }))
         .map((f, idx) => ({
         ...f,
         properties: { ...(f.properties ?? {}), routeIndex: idx },
@@ -750,12 +896,8 @@ export function RouteMapWidget() {
         ranked.length > 0 &&
         stepHazardPoints.length > 0 &&
         routeUnacceptableNearSteps(ranked[0], stepHazardPoints, wheelchairStepsNearSq);
-      const altHint =
-        alternativeCount > 1 && ranked.length < alternativeCount
-          ? " Сервис мог вернуть меньше линий, чем запрошено — без сотен лишних запросов к API."
-          : "";
       setMsg(
-        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.${altHint}${stairWarn ? " Внимание: выбранный путь проходит рядом с лестницей по данным OSM — перепроверьте участок." : ""}`,
+        `Маршрут (${requestProfile}): ~${km} км${min != null ? `, ~${min} мин` : ""}. Альтернатив: ${ranked.length}.${stairWarn ? " Внимание: выбранный путь проходит рядом с лестницей по данным OSM — перепроверьте участок." : ""}`,
       );
       if (inRateLimitCooldown) {
         setErr(
