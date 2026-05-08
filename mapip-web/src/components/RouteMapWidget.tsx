@@ -148,52 +148,6 @@ function isTooSimilarRoute(
   return existing.some((ex) => isAlmostFullOverlap(candidate, ex));
 }
 
-function offsetPointMeters(
-  lat: number,
-  lon: number,
-  pX: number,
-  pY: number,
-  offsetMeters: number,
-): [number, number] {
-  const latRad = (lat * Math.PI) / 180;
-  const dLat = (pY * offsetMeters) / 111320;
-  const dLon = (pX * offsetMeters) / Math.max(111320 * Math.cos(latRad), 1e-6);
-  return [lat + dLat, lon + dLon];
-}
-
-/** Локальный fallback: если ORS вернул меньше линий, добираем визуальные альтернативы до нужного числа. */
-function buildVisualFallbackAlternatives(
-  base: GeoJSON.Feature<GeoJSON.LineString>,
-  needCount: number,
-): GeoJSON.Feature<GeoJSON.LineString>[] {
-  if (needCount <= 0) return [];
-  const src = routeLatLonCoords(base);
-  if (src.length < 2) return [];
-  const out: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-  const offsets = [32, -32, 58, -58, 76, -76];
-  for (const shiftM of offsets) {
-    if (out.length >= needCount) break;
-    const shifted: [number, number][] = src.map((pt, i) => {
-      const prev = src[Math.max(0, i - 1)];
-      const next = src[Math.min(src.length - 1, i + 1)];
-      const refLat = (prev[0] + next[0]) / 2;
-      const dxM = (next[1] - prev[1]) * 111320 * Math.cos((refLat * Math.PI) / 180);
-      const dyM = (next[0] - prev[0]) * 111320;
-      const len = Math.sqrt(dxM * dxM + dyM * dyM);
-      if (len < 1e-6) return pt;
-      const pX = -dyM / len;
-      const pY = dxM / len;
-      return offsetPointMeters(pt[0], pt[1], pX, pY, shiftM);
-    });
-    out.push({
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: shifted.map(([lat, lon]) => [lon, lat]) },
-      properties: { ...(base.properties ?? {}), synthetic: true },
-    });
-  }
-  return out;
-}
-
 function stepObstaclePoints(overpass: GeoJSON.Feature[]): { lat: number; lon: number }[] {
   const out: { lat: number; lon: number }[] = [];
   for (const f of overpass) {
@@ -848,18 +802,6 @@ export function RouteMapWidget() {
           }
           if (isTooSimilarRoute(cand, routeFeaturesRaw)) continue;
           routeFeaturesRaw.push(cand);
-        }
-      }
-
-      if (routeFeaturesRaw.length > 0 && routeFeaturesRaw.length < alternativeCount) {
-        const fallback = buildVisualFallbackAlternatives(
-          routeFeaturesRaw[0],
-          alternativeCount - routeFeaturesRaw.length,
-        );
-        for (const f of fallback) {
-          if (routeFeaturesRaw.length >= alternativeCount) break;
-          if (isTooSimilarRoute(f, routeFeaturesRaw)) continue;
-          routeFeaturesRaw.push(f);
         }
       }
 
