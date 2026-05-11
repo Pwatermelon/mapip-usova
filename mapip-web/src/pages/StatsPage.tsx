@@ -3,12 +3,22 @@ import { fetchJson } from "../api";
 
 type SettingsDto = {
   rnValue?: number;
+  RnValue?: number;
   cronExpression?: string;
+  CronExpression?: string;
   excludedCategories?: string[];
+  ExcludedCategories?: string[];
 };
 
 type InfraDto = Record<string, string[]>;
 type MetricCard = { key: string; title: string; value: string; note: string };
+
+type StatisticsDto = {
+  pending: number;
+  added: number;
+  deleted: number;
+  history: { date: string; added: number; deleted: number; pending: number }[];
+};
 
 export function StatsPage() {
   const [rnValue, setRnValue] = useState(4);
@@ -19,14 +29,17 @@ export function StatsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricCard[]>([]);
   const [metricsErr, setMetricsErr] = useState<string | null>(null);
+  const [stats, setStats] = useState<StatisticsDto | null>(null);
+  const [statsErr, setStatsErr] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       try {
         const s = await fetchJson<SettingsDto>("/api/admin/GetSettings");
-        setRnValue(s.rnValue ?? 4);
-        setCronExpression(s.cronExpression ?? "0 0 * * *");
-        setExcluded(s.excludedCategories ?? []);
+        const rn = s.rnValue ?? s.RnValue ?? 4;
+        setRnValue(rn);
+        setCronExpression(s.cronExpression ?? s.CronExpression ?? "0 0 * * *");
+        setExcluded(s.excludedCategories ?? s.ExcludedCategories ?? []);
       } catch {
         // keep defaults
       }
@@ -37,12 +50,24 @@ export function StatsPage() {
         setInfra({});
       }
       try {
+        const st = await fetchJson<StatisticsDto>("/api/Statistics");
+        setStats(st);
+        setStatsErr(null);
+      } catch {
+        setStats(null);
+        setStatsErr("Не удалось загрузить статистику модерации (таблицы pending / объекты).");
+      }
+      try {
         const [objects, comments, popular] = await Promise.all([
           fetchJson<{ id: number }[]>("/GetSocialMapObject"),
           fetchJson<{ id: number }[]>("/api/comment/GetLastComments"),
-          fetchJson<{ mapObject: { id: number } }[]>("/api/recommendation/GetPopularRecommendations"),
+          fetchJson<{ mapObject: { id: number } }[] | { id: number }[]>("/api/recommendation/GetPopularRecommendations"),
         ]);
-        const uniquePopular = new Set(popular.map((x) => x.mapObject?.id).filter(Boolean)).size;
+        const popularRows =
+          Array.isArray(popular) && popular.length > 0 && typeof popular[0] === "object" && popular[0] !== null && "mapObject" in popular[0]
+            ? (popular as { mapObject: { id: number } }[])
+            : [];
+        const uniquePopular = new Set(popularRows.map((x) => x.mapObject?.id).filter(Boolean)).size;
         const commentCoverage = objects.length ? Math.round((comments.length / objects.length) * 100) : 0;
         setMetrics([
           {
@@ -109,6 +134,53 @@ export function StatsPage() {
     <section className="info-page">
       <h2>Статистика и настройки</h2>
       <section className="detail-block">
+        <h3 className="detail-subtitle">Статистика модерации (как в legacy StatisticsController)</h3>
+        <p className="muted">
+          Очередь на публикацию, объекты за последние 30 дней, отклонённые заявки и помесячная история по дням из базы.
+        </p>
+        {statsErr && <p className="err">{statsErr}</p>}
+        {stats && (
+          <>
+            <div className="check-grid" style={{ marginTop: 12 }}>
+              <article className="search-hit">
+                <strong>В очереди (Pending)</strong>
+                <p style={{ fontSize: "1.1rem", marginTop: 6 }}>{stats.pending}</p>
+              </article>
+              <article className="search-hit">
+                <strong>Добавлено на карту за 30 дней</strong>
+                <p style={{ fontSize: "1.1rem", marginTop: 6 }}>{stats.added}</p>
+              </article>
+              <article className="search-hit">
+                <strong>Отклонено (всего)</strong>
+                <p style={{ fontSize: "1.1rem", marginTop: 6 }}>{stats.deleted}</p>
+              </article>
+            </div>
+            <div style={{ overflowX: "auto", marginTop: 16 }}>
+              <table className="muted" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                    <th style={{ padding: "6px 8px" }}>Дата</th>
+                    <th style={{ padding: "6px 8px" }}>Добавлено</th>
+                    <th style={{ padding: "6px 8px" }}>Отклонено</th>
+                    <th style={{ padding: "6px 8px" }}>В очереди (за день)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.history.map((h) => (
+                    <tr key={h.date} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "6px 8px" }}>{h.date}</td>
+                      <td style={{ padding: "6px 8px" }}>{h.added}</td>
+                      <td style={{ padding: "6px 8px" }}>{h.deleted}</td>
+                      <td style={{ padding: "6px 8px" }}>{h.pending}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+      <section className="detail-block">
         <h3 className="detail-subtitle">Результаты исследований и продуктовый эффект</h3>
         <p className="muted">
           Здесь показываются не просто графики, а продуктовые показатели: как эксперименты влияют на качество маршрутов,
@@ -127,6 +199,13 @@ export function StatsPage() {
         <p className="muted small" style={{ marginTop: 10 }}>
           Как считается: данные берутся напрямую из рабочих API (`объекты`, `комментарии`, `популярные рекомендации`) и
           пересчитываются в реальном времени при открытии страницы.
+        </p>
+      </section>
+      <section className="detail-block">
+        <h3 className="detail-subtitle">Панель администратора — параметры рекомендаций</h3>
+        <p className="muted">
+          RnValue, cron и исключённые категории хранятся в PostgreSQL (`AdminSettings`), категории для чекбоксов
+          подгружаются из онтологии (`/api/admin/get/infrastructure`).
         </p>
       </section>
       <div className="field">

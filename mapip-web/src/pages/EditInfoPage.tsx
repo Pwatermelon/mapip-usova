@@ -117,6 +117,7 @@ export function EditInfoPage() {
       return;
     }
     const fd = new FormData();
+    fd.append("editExisting", "true");
     fd.append("mapObjectId", String(selected.id));
     fd.append("name", selected.display_name);
     fd.append("address", address);
@@ -131,7 +132,7 @@ export function EditInfoPage() {
     setErr(null);
     setMsg(null);
     try {
-      const res = await fetch("/client/AddMapObject", { method: "POST", body: fd });
+      const res = await fetch("/client/AddMapObject", { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
       setMsg("Изменения отправлены.");
     } catch (e) {

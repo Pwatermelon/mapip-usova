@@ -28,12 +28,15 @@ services:
       - mapip
 
   mapip-core:
-    build: ./mapip-core
+    build:
+      context: .
+      dockerfile: mapip-core/Dockerfile
     depends_on:
       - db
     environment:
       DATABASE_URL: postgresql://postgres:12345@db:5432/map
       SESSION_SECRET: ${SESSION_SECRET:-mapip-dev-change-me}
+      ONTOLOGY_PATH: /app/data/ontology/Ontology_Social_objects_new.rdf
     expose:
       - "8000"
     networks:

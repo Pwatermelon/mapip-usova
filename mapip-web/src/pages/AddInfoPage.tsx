@@ -125,8 +125,13 @@ export function AddInfoPage() {
     selectedAccessibility.forEach((v) => fd.append("accessibility", v));
     disability.forEach((v) => fd.append("disabilityCategory", v));
     if (images) Array.from(images).forEach((f) => fd.append("images", f));
+    if (user?.id) {
+      fd.append("userId", String(user.id));
+      fd.append("mapObjectId", "0");
+      fd.append("excluded", "false");
+    }
     try {
-      const res = await fetch("/client/AddMapObject", { method: "POST", body: fd });
+      const res = await fetch("/client/AddMapObject", { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
       setMsg("Объект отправлен.");
     } catch (e) {

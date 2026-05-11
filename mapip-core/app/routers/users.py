@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Favorite, MapObject, User
+from app.models import Comment, Favorite, MapObject, User
 from app.serializers import map_object_to_json, user_public
 
 router = APIRouter(prefix="/api/users", tags=["users"])

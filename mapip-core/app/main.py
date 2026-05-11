@@ -1,14 +1,45 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
-from app.routers import comments, legacy, map_objects, routes_db, users
+from app.routers import comments, expert, legacy, map_objects, routes_db, statistics, users
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    import app.models  # noqa: F401 — регистрация моделей в Base.metadata
+    from app.db import Base, SessionLocal, engine
+    from app.models import AdminSetting
+    from app.ontology_service import load_graph
+
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        if db.query(AdminSetting).first() is None:
+            db.add(
+                AdminSetting(
+                    RnValue=4,
+                    ExcludedCategories="",
+                    CronExpression="0 0 * * *",
+                )
+            )
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+    load_graph(settings.ontology_path)
+    yield
+
 
 app = FastAPI(
     title="MAPIP Core API",
     description="Доменные данные карты, пользователи, комментарии, сохранённые маршруты.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
@@ -25,6 +56,8 @@ app.include_router(comments.router)
 app.include_router(users.router)
 app.include_router(routes_db.router)
 app.include_router(legacy.router)
+app.include_router(statistics.router)
+app.include_router(expert.router)
 
 
 @app.get("/")

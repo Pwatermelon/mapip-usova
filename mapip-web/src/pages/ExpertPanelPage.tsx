@@ -4,13 +4,95 @@ import { fetchJson } from "../api";
 type CommentRow = { id: number; text: string; rate: number; user?: { name: string }; date?: string };
 type UserRow = { id: number; name?: string; email: string; type?: number; password?: string };
 
+type PendingRow = {
+  id: number;
+  displayName: string;
+  address: string;
+  x?: number | null;
+  y?: number | null;
+  type: string;
+  description?: string | null;
+  disabilityCategory?: string | null;
+  workingHours?: string | null;
+  status?: string;
+  dateAdded?: string | null;
+};
+
 export function ExpertPanelPage() {
+  const [pending, setPending] = useState<PendingRow[]>([]);
+  const [editPending, setEditPending] = useState<Record<number, PendingRow>>({});
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentSearch, setCommentSearch] = useState("");
   const [usersEmail, setUsersEmail] = useState("");
   const [user, setUser] = useState<UserRow | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+
+  const loadPending = async () => {
+    setErr(null);
+    setOk(null);
+    try {
+      const data = await fetchJson<PendingRow[]>("/api/Expert/pending");
+      setPending(data);
+      const m: Record<number, PendingRow> = {};
+      for (const p of data) m[p.id] = { ...p };
+      setEditPending(m);
+    } catch (e) {
+      setErr(`Очередь объектов: ${String(e)}`);
+      setPending([]);
+    }
+  };
+
+  const approvePending = async (id: number) => {
+    setErr(null);
+    setOk(null);
+    try {
+      const res = await fetch(`/api/Expert/${id}/approve`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      setOk("Объект одобрен и добавлен на карту.");
+      await loadPending();
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
+  const rejectPending = async (id: number) => {
+    setErr(null);
+    setOk(null);
+    try {
+      const res = await fetch(`/api/Expert/${id}/reject`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      setOk("Заявка отклонена.");
+      await loadPending();
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
+  const savePendingEdit = async (id: number) => {
+    const row = editPending[id];
+    if (!row) return;
+    setErr(null);
+    setOk(null);
+    try {
+      const res = await fetch(`/api/Expert/${id}/edit`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: row.displayName,
+          address: row.address,
+          description: row.description ?? "",
+          disabilityCategory: row.disabilityCategory ?? "",
+          workingHours: row.workingHours ?? "",
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setOk("Черновик заявки обновлён.");
+      await loadPending();
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
 
   const loadComments = async (path: string) => {
     setErr(null);
@@ -98,6 +180,101 @@ export function ExpertPanelPage() {
   return (
     <section className="info-page">
       <h2>Панель эксперта</h2>
+      <h3>Модерация новых объектов (legacy ExpertController)</h3>
+      <p className="muted" style={{ marginBottom: 8 }}>
+        Заявки со статусом Pending: одобрение создаёт запись в `MapObject`, отклонение помечает заявку как Rejected.
+      </p>
+      <div className="field-row" style={{ marginBottom: 12 }}>
+        <button type="button" className="btn" onClick={() => void loadPending()}>
+          Загрузить очередь
+        </button>
+      </div>
+      {pending.map((p) => {
+        const row = editPending[p.id] ?? p;
+        return (
+          <div key={p.id} className="search-hit" style={{ marginBottom: 12 }}>
+            <p className="muted">
+              Тип: {row.type} · #{p.id}
+              {row.dateAdded ? ` · ${row.dateAdded}` : ""}
+            </p>
+            <div className="field">
+              <label>Название</label>
+              <input
+                value={row.displayName}
+                onChange={(e) =>
+                  setEditPending((prev) => ({
+                    ...prev,
+                    [p.id]: { ...row, displayName: e.target.value },
+                  }))
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Адрес</label>
+              <input
+                value={row.address}
+                onChange={(e) =>
+                  setEditPending((prev) => ({
+                    ...prev,
+                    [p.id]: { ...row, address: e.target.value },
+                  }))
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Описание</label>
+              <textarea
+                value={row.description ?? ""}
+                onChange={(e) =>
+                  setEditPending((prev) => ({
+                    ...prev,
+                    [p.id]: { ...row, description: e.target.value },
+                  }))
+                }
+              />
+            </div>
+            <div className="field-row">
+              <div className="field" style={{ flex: 1 }}>
+                <label>Категория МГН (строка)</label>
+                <input
+                  value={row.disabilityCategory ?? ""}
+                  onChange={(e) =>
+                    setEditPending((prev) => ({
+                      ...prev,
+                      [p.id]: { ...row, disabilityCategory: e.target.value },
+                    }))
+                  }
+                />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Часы работы</label>
+                <input
+                  value={row.workingHours ?? ""}
+                  onChange={(e) =>
+                    setEditPending((prev) => ({
+                      ...prev,
+                      [p.id]: { ...row, workingHours: e.target.value },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="field-row" style={{ marginTop: 8 }}>
+              <button type="button" className="btn btn-sm" onClick={() => void savePendingEdit(p.id)}>
+                Сохранить правки
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => void approvePending(p.id)}>
+                Одобрить
+              </button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => void rejectPending(p.id)}>
+                Отклонить
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      <hr />
+      <h3>Комментарии и пользователи</h3>
       <div className="field-row" style={{ marginBottom: 8 }}>
         <button type="button" className="btn" onClick={() => void loadComments("/api/comment/GetLastComments")}>
           Загрузить последние комментарии

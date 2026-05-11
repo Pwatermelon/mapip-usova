@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Table
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -76,3 +76,37 @@ class Favorite(Base):
     MapObjectID = Column("MapObjectID", Integer, ForeignKey("MapObject.Id"), primary_key=True, quote=True)
 
     map_object = relationship("MapObject", foreign_keys=[MapObjectID])
+
+
+class AdminSetting(Base):
+    """Таблица public.\"AdminSettings\" как в legacy MapApi."""
+
+    __tablename__ = "AdminSettings"
+
+    Id = Column("Id", Integer, primary_key=True, autoincrement=True, quote=True)
+    RnValue = Column("RnValue", Integer, nullable=False, default=4, quote=True)
+    ExcludedCategories = Column("ExcludedCategories", String, nullable=True, quote=True)
+    CronExpression = Column("CronExpression", String, nullable=False, default="0 0 * * *", quote=True)
+
+
+class PendingSocialMapObject(Base):
+    __tablename__ = "PendingSocialMapObject"
+
+    Id = Column("Id", Integer, primary_key=True, autoincrement=True, quote=True)
+    DisplayName = Column("DisplayName", String, nullable=False, quote=True)
+    Address = Column("Address", String, nullable=False, quote=True)
+    X = Column("X", Float, nullable=True, quote=True)
+    Y = Column("Y", Float, nullable=True, quote=True)
+    Type = Column("Type", String, nullable=False, quote=True)
+    Description = Column("Description", String, nullable=True, quote=True)
+    DisabilityCategory = Column("DisabilityCategory", String, nullable=True, quote=True)
+    WorkingHours = Column("WorkingHours", String, nullable=True, quote=True)
+    Images = Column("Images", String, nullable=True, quote=True)
+    Accessibility = Column("Accessibility", String, nullable=True, quote=True)
+    Excluded = Column("Excluded", Boolean, nullable=False, default=False, quote=True)
+    MapObjectLinkId = Column("MapObject", Integer, nullable=True, quote=True)
+    DateAdded = Column("DateAdded", DateTime, nullable=False, quote=True)
+    Status = Column("Status", String, nullable=False, quote=True)
+    UserId = Column("UserId", Integer, ForeignKey("User.Id"), nullable=False, quote=True)
+
+    user = relationship("User", foreign_keys=[UserId])
