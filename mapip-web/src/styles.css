@@ -447,6 +447,100 @@ button.btn-ghost {
   margin-top: 1rem;
 }
 
+/* Окно входа: светлая карточка в стиле legacy (не тёмный var(--surface) из базовой темы). */
+.login-modal.modal-backdrop {
+  background: rgba(15, 23, 42, 0.4);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.login-modal .login-modal-card.modal-card {
+  max-width: 400px;
+  padding: 1.5rem 1.35rem 1.35rem;
+  background: #fff;
+  color: #1e293b;
+  border: 1px solid #bfdbfe;
+  box-shadow: 0 24px 48px -12px rgba(30, 58, 138, 0.22);
+}
+
+.login-modal .login-modal-card h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.28rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.login-modal-lead {
+  margin: 0 0 1rem;
+  line-height: 1.45;
+}
+
+.login-modal-form {
+  margin: 0;
+}
+
+.login-modal-field {
+  margin-bottom: 0.85rem;
+}
+
+.login-modal-field label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 0.35rem;
+}
+
+.login-modal .modal-input {
+  margin-top: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+}
+
+.login-modal .modal-input::placeholder {
+  color: #94a3b8;
+}
+
+.login-modal .modal-input:focus {
+  outline: none;
+  border-color: #1e90ff;
+  box-shadow: 0 0 0 3px rgba(30, 144, 255, 0.22);
+}
+
+.login-modal .modal-input:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.login-modal-err {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: #b91c1c;
+}
+
+.login-modal-actions {
+  margin-top: 1.15rem;
+  flex-wrap: wrap;
+}
+
+.login-modal-cancel.btn-ghost {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.login-modal-cancel.btn-ghost:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.login-modal-submit {
+  min-width: 7rem;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1005,4 +1099,20 @@ body.visually-impaired-mode button {
   .nav .nav-legacy-link {
     font-size: 13px;
   }
+}
+
+/* После глобальных legacy-правок кнопок — отмена в модалке входа остаётся нейтральной. */
+.login-modal button.login-modal-cancel.btn-ghost {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.login-modal button.login-modal-cancel.btn-ghost:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.login-modal button.login-modal-submit.btn-green {
+  background: #17b52e;
+  color: #fff;
 }

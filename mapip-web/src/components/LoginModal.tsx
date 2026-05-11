@@ -33,53 +33,70 @@ export function LoginModal({ open, onClose }: Props) {
 
   return (
     <div
-      className="modal-backdrop"
+      className="modal-backdrop login-modal"
       role="presentation"
       onClick={onClose}
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
       <div
-        className="modal-card"
+        className="modal-card login-modal-card"
         role="dialog"
+        aria-modal="true"
         aria-labelledby="login-title"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <h2 id="login-title">Вход</h2>
-        <p className="muted small">Один раз вошли — сессия для карты и комментариев.</p>
-        <label className="sr-only" htmlFor="login-email">
-          Email
-        </label>
-        <input
-          id="login-email"
-          className="modal-input"
-          type="email"
-          autoComplete="username"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <label className="sr-only" htmlFor="login-pass">
-          Пароль
-        </label>
-        <input
-          id="login-pass"
-          className="modal-input"
-          type="password"
-          autoComplete="current-password"
-          placeholder="Пароль"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        {err && <p className="err">{err}</p>}
-        <div className="modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
-            Отмена
-          </button>
-          <button type="button" className="btn" onClick={() => void submit()} disabled={busy}>
-            {busy ? "…" : "Войти"}
-          </button>
-        </div>
+        <h2 id="login-title">Вход в аккаунт</h2>
+        <p className="login-modal-lead muted small">
+          После входа сохраняется сессия для карты, комментариев и избранного.
+        </p>
+        <form
+          className="login-modal-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <div className="login-modal-field">
+            <label htmlFor="login-email">Электронная почта</label>
+            <input
+              id="login-email"
+              className="modal-input"
+              type="email"
+              autoComplete="username"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+          <div className="login-modal-field">
+            <label htmlFor="login-pass">Пароль</label>
+            <input
+              id="login-pass"
+              className="modal-input"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Введите пароль"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+          {err && (
+            <p className="login-modal-err err" role="alert">
+              {err}
+            </p>
+          )}
+          <div className="modal-actions login-modal-actions">
+            <button type="button" className="btn btn-ghost login-modal-cancel" onClick={onClose} disabled={busy}>
+              Отмена
+            </button>
+            <button type="submit" className="btn btn-green login-modal-submit" disabled={busy}>
+              {busy ? "Вход…" : "Войти"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

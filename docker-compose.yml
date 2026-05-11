@@ -37,6 +37,10 @@ services:
       DATABASE_URL: postgresql://postgres:12345@db:5432/map
       SESSION_SECRET: ${SESSION_SECRET:-mapip-dev-change-me}
       ONTOLOGY_PATH: /app/data/ontology/Ontology_Social_objects_new.rdf
+      # Тестовый админ (User.Type=1): admin@mapip.local / admin — только если записи с этим email ещё нет.
+      MAPIP_SEED_DEV_ADMIN: "true"
+      MAPIP_DEV_ADMIN_EMAIL: admin@mapip.local
+      MAPIP_DEV_ADMIN_PASSWORD: admin
     expose:
       - "8000"
     networks:

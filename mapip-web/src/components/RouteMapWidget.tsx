@@ -341,7 +341,8 @@ export function RouteMapWidget() {
   const [mapReady, setMapReady] = useState(false);
   const [routeSteps, setRouteSteps] = useState<RouteInstructionStep[]>([]);
   const [routeSummaryText, setRouteSummaryText] = useState<string | null>(null);
-  const [wheelchairLongWarn, setWheelchairLongWarn] = useState(false);
+  /** Текст предупреждения для колясочного профиля или null, если пороги не превышены. */
+  const [wheelchairLongWarnText, setWheelchairLongWarnText] = useState<string | null>(null);
 
   mapPickModeRef.current = mapPickMode;
   objectsRef.current = objects;
@@ -734,7 +735,7 @@ export function RouteMapWidget() {
     setMsg(null);
     setRouteSteps([]);
     setRouteSummaryText(null);
-    setWheelchairLongWarn(false);
+    setWheelchairLongWarnText(null);
     const map = mapRef.current;
     if ((!fromQ.trim() && !useMyLocationRouting) || !toQ.trim()) {
       setErr("Укажите «Откуда» и «Куда».");
@@ -784,8 +785,28 @@ export function RouteMapWidget() {
       const summ = (feat0?.properties as { summary?: { distance?: number; duration?: number } } | undefined)?.summary;
       const distM = summ?.distance ?? 0;
       const durS = summ?.duration ?? 0;
-      if (requestProfile === "wheelchair" && (distM > 7000 || durS > 45 * 60)) {
-        setWheelchairLongWarn(true);
+      const tailWheelchair =
+        " Оцените силы и при необходимости разбейте поездку на части.";
+      if (requestProfile === "wheelchair") {
+        const tooFar = distM > 7000;
+        const tooLong = durS > 45 * 60;
+        if (tooFar || tooLong) {
+          const kmApprox = distM > 0 ? (distM / 1000).toFixed(1) : null;
+          const minApprox = durS > 0 ? Math.round(durS / 60) : null;
+          let line: string;
+          if (tooFar && tooLong) {
+            line = `Внимание: маршрут для коляски превышает оба порога — по длине (более 7 км${kmApprox != null ? `, около ${kmApprox} км` : ""}) и по времени (более 45 мин${minApprox != null ? `, около ${minApprox} мин` : ""}).`;
+          } else if (tooFar) {
+            line = `Внимание: маршрут для коляски превышает порог по длине — более 7 км${kmApprox != null ? ` (около ${kmApprox} км)` : ""}.`;
+          } else {
+            line = `Внимание: маршрут для коляски превышает порог по времени — более 45 минут${minApprox != null ? ` (около ${minApprox} мин)` : ""}.`;
+          }
+          setWheelchairLongWarnText(line + tailWheelchair);
+        } else {
+          setWheelchairLongWarnText(null);
+        }
+      } else {
+        setWheelchairLongWarnText(null);
       }
       const km0 = distM > 0 ? (distM / 1000).toFixed(2) : "?";
       const min0 = durS > 0 ? Math.round(durS / 60) : null;
@@ -1099,11 +1120,8 @@ export function RouteMapWidget() {
         <div ref={mapEl} className="map-canvas" />
         {(routeSteps.length > 0 || routeSummaryText) && (
           <div className="route-instructions-overlay" aria-live="polite">
-            {wheelchairLongWarn && (
-              <div className="wheelchair-route-warn">
-                Внимание: маршрут для коляски длиннее 7 км или дольше 45 минут — оцените силы и при необходимости разбейте
-                поездку на части.
-              </div>
+            {wheelchairLongWarnText && (
+              <div className="wheelchair-route-warn">{wheelchairLongWarnText}</div>
             )}
             <h4>Маршрут</h4>
             {routeSummaryText && <p className="route-summary-line muted">{routeSummaryText}</p>}

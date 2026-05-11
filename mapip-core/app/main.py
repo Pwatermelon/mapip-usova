@@ -31,7 +31,7 @@ def _migrate_db_for_ontology_object_ids(engine) -> None:
 async def lifespan(_app: FastAPI):
     import app.models  # noqa: F401 — регистрация моделей в Base.metadata
     from app.db import Base, SessionLocal, engine
-    from app.models import AdminSetting
+    from app.models import AdminSetting, User
     from app.ontology_service import load_graph
 
     Base.metadata.create_all(bind=engine)
@@ -47,6 +47,19 @@ async def lifespan(_app: FastAPI):
                 )
             )
             db.commit()
+        if settings.seed_dev_admin:
+            email = settings.dev_admin_email.strip()
+            if email and db.query(User).filter(User.Email == email).first() is None:
+                db.add(
+                    User(
+                        Name="Администратор (dev)",
+                        Type=1,
+                        Email=email,
+                        Password=settings.dev_admin_password,
+                        Score=0,
+                    )
+                )
+                db.commit()
     except Exception:
         db.rollback()
     finally:
