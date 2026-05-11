@@ -110,8 +110,10 @@ async def _post_ors(profile: str, payload: dict[str, Any]) -> httpx.Response:
     url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
     params = {"api_key": settings.openroute_api_key}
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    merged = dict(payload)
+    merged.setdefault("instructions", True)
     async with httpx.AsyncClient(timeout=60.0) as client:
-        return await client.post(url, params=params, headers=headers, json=payload)
+        return await client.post(url, params=params, headers=headers, json=merged)
 
 
 def _has_ors_2007(text: str | None) -> bool:
@@ -476,8 +478,8 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
         # Для маршрута через конкретные объекты строим один детерминированный путь.
         alt = 1
 
-    # Не догружаем альтернативы через лишние POST к ORS (квота). Отдаём то, что вернул один запрос с alternative_routes.
-    poi_via_limit = 0
+    # Доп. точки для вариантов маршрута (ORS часто отдаёт одну линию — добиваем через via и offset).
+    poi_via_limit = min(12, max(4, alt * 4)) if alt > 1 and not via_points else 0
 
     if alt > 1:
         payload: dict[str, Any] = {
@@ -568,7 +570,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
                 end=coordinates[1],
                 base_geo=main_geo,
                 need_count=alt - len(routes),
-                max_ors_posts=0,
+                max_ors_posts=8,
             )
             routes.extend(extras)
         return _merge_geojson_features(routes[:alt])
@@ -611,7 +613,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             end=coordinates[1],
             base_geo=base_geo,
             need_count=alt - len(routes),
-            max_ors_posts=0,
+            max_ors_posts=8,
         )
         routes.extend(extras)
     return _merge_geojson_features(routes[:alt])

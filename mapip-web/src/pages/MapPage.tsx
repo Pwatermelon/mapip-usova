@@ -99,7 +99,6 @@ export function MapPage() {
   const [recommendationRows, setRecommendationRows] = useState<RecommendationRow[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [showFilter, setShowFilter] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [accOptions, setAccOptions] = useState<string[]>([]);
   const [filterDisability, setFilterDisability] = useState<string[]>([]);
   const [filterAccessibility, setFilterAccessibility] = useState<string[]>([]);
@@ -274,7 +273,6 @@ export function MapPage() {
     setMode(next);
     setActiveCategory(null);
     setShowFilter(false);
-    setMenuOpen(false);
     setShowComments(true);
     setErr(null);
     if (next !== "search") setHits(null);
@@ -283,7 +281,6 @@ export function MapPage() {
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setMenuOpen(false);
         setShowFilter(false);
       }
     };
@@ -500,7 +497,7 @@ export function MapPage() {
     }
   };
   const baseRows: RecommendationRow[] =
-    mode === "search" ? (hits ?? objects.slice(0, 14)).map((m) => ({ mapObject: m })) : recommendationRows;
+    mode === "search" ? (hits ?? objects).map((m) => ({ mapObject: m })) : recommendationRows;
   const listRows = useMemo(() => {
     if (!activeCategory) return baseRows;
     return baseRows.filter((r) => categoryByType(r.mapObject.type) === activeCategory);
@@ -572,11 +569,6 @@ export function MapPage() {
     {mapTab === "objects" ? (
     <div className="map-layout">
       <aside className="side-panel">
-        <div className="toolbar-header">
-          <button type="button" className="menu-icon-btn" onClick={() => setMenuOpen(true)}>
-            ☰
-          </button>
-        </div>
         <h2>{mode === "search" ? "Объекты и поиск" : "Режим просмотра"}</h2>
         {!user && <p className="hint-banner muted">Вход — в правом верхнем углу.</p>}
         <div className="field-row" style={{ marginBottom: 10 }}>
@@ -593,36 +585,6 @@ export function MapPage() {
             Избранное
           </button>
         </div>
-        {menuOpen && (
-          <div className="slide-menu-open">
-            <div className="menu-header">
-              <button type="button" className="menu-icon-btn" onClick={() => setMenuOpen(false)}>
-                ✖
-              </button>
-            </div>
-            <p className="muted">Меню</p>
-            <div className="field">
-              <button type="button" className="btn btn-ghost" onClick={() => activateMode("search")}>
-                Поиск объекта
-              </button>
-            </div>
-            <div className="field">
-              <button type="button" className="btn btn-ghost" onClick={() => { void loadPersonal(); setMenuOpen(false); }}>
-                Что Вам стоит посетить?
-              </button>
-            </div>
-            <div className="field">
-              <button type="button" className="btn btn-ghost" onClick={() => { void loadPopular(); setMenuOpen(false); }}>
-                Что стоит посетить по мнению общества?
-              </button>
-            </div>
-            <div className="field">
-              <button type="button" className="btn btn-ghost" onClick={() => { void loadLikes(); setMenuOpen(false); }}>
-                Избранное
-              </button>
-            </div>
-          </div>
-        )}
         {(mode === "personal" || mode === "popular") && (
           <div className="field-row" style={{ marginBottom: 10 }}>
             <button type="button" className="btn btn-ghost" onClick={() => setShowFilter((v) => !v)}>

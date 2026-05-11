@@ -261,6 +261,35 @@ function hasOrs2007(text: string): boolean {
   return /2007|response format is not supported/i.test(text);
 }
 
+export type RouteInstructionStep = { instruction: string; distanceM?: number };
+
+/** Пошаговые подсказки из GeoJSON OpenRouteService (properties.segments[].steps[]). */
+function extractInstructionSteps(data: OrsGeoJson): RouteInstructionStep[] {
+  const out: RouteInstructionStep[] = [];
+  const feat = data.features?.[0];
+  if (!feat?.properties || typeof feat.properties !== "object") return out;
+  const props = feat.properties as {
+    segments?: { steps?: { instruction?: string; distance?: number }[] }[];
+  };
+  for (const seg of props.segments ?? []) {
+    for (const step of seg.steps ?? []) {
+      const ins = step.instruction;
+      if (ins != null && String(ins).trim()) {
+        out.push({ instruction: String(ins), distanceM: step.distance });
+      }
+    }
+  }
+  return out;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function RouteMapWidget() {
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -269,6 +298,7 @@ export function RouteMapWidget() {
   const meMarkerRef = useRef<maplibregl.Marker | null>(null);
   const geoWatchIdRef = useRef<number | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const objectsRef = useRef<MapObject[]>([]);
   const altRateLimitUntilRef = useRef(0);
   const buildInFlightRef = useRef(false);
   const mapPickModeRef = useRef<"from" | "to" | null>(null);
@@ -294,8 +324,12 @@ export function RouteMapWidget() {
   const [mapPickMode, setMapPickMode] = useState<"from" | "to" | null>(null);
   /** Без этого эффект с setData может отработать до map.on("load") и больше не повториться. */
   const [mapReady, setMapReady] = useState(false);
+  const [routeSteps, setRouteSteps] = useState<RouteInstructionStep[]>([]);
+  const [routeSummaryText, setRouteSummaryText] = useState<string | null>(null);
+  const [wheelchairLongWarn, setWheelchairLongWarn] = useState(false);
 
   mapPickModeRef.current = mapPickMode;
+  objectsRef.current = objects;
 
   useEffect(() => {
     fromPointRef.current = fromPoint;
@@ -423,11 +457,29 @@ export function RouteMapWidget() {
           if (!coords) return;
           popupRef.current?.remove();
           if (f.layer?.id === "core-objects-circles") {
-            const name = String((f.properties as { name?: string } | undefined)?.name ?? "Объект из базы");
-            popupRef.current = new maplibregl.Popup({ offset: 12 })
-              .setLngLat([coords[0], coords[1]])
-              .setText(name)
-              .addTo(map);
+            const pr = (f.properties as { id?: number; name?: string } | undefined) ?? {};
+            const oid = pr.id;
+            const name = String(pr.name ?? "Объект");
+            const el = document.createElement("div");
+            el.className = "ontology-route-popup";
+            el.innerHTML = `<div class="ontology-route-popup-title">${escapeHtml(name)}</div><div class="ontology-route-popup-actions"><button type="button" class="btn btn-sm" data-act="from">Откуда</button><button type="button" class="btn btn-sm" data-act="to">Куда</button></div>`;
+            const popup = new maplibregl.Popup({ offset: 14, closeButton: true }).setLngLat([coords[0], coords[1]]).setDOMContent(el).addTo(map);
+            popupRef.current = popup;
+            const applyObject = (target: "from" | "to") => {
+              if (oid == null) return;
+              const obj = objectsRef.current.find((o) => o.id === oid);
+              if (!obj) return;
+              if (target === "from") {
+                setFromQ(obj.display_name);
+                setFromPoint([obj.x, obj.y]);
+              } else {
+                setToQ(obj.display_name);
+                setToPoint([obj.x, obj.y]);
+              }
+              popup.remove();
+            };
+            el.querySelector('[data-act="from"]')?.addEventListener("click", () => applyObject("from"));
+            el.querySelector('[data-act="to"]')?.addEventListener("click", () => applyObject("to"));
           } else {
             const props = (f.properties as { label?: string; tags?: Record<string, string> } | undefined) ?? {};
             const text = `${props.label ?? "Объект OSM"} — ${objectTypeLabel(props.tags, "инфраструктура")}`;
@@ -665,6 +717,9 @@ export function RouteMapWidget() {
     buildInFlightRef.current = true;
     setErr(null);
     setMsg(null);
+    setRouteSteps([]);
+    setRouteSummaryText(null);
+    setWheelchairLongWarn(false);
     const map = mapRef.current;
     if ((!fromQ.trim() && !useMyLocationRouting) || !toQ.trim()) {
       setErr("Укажите «Откуда» и «Куда».");
@@ -709,6 +764,19 @@ export function RouteMapWidget() {
         setErr("Сервис маршрутов вернул не JSON (проверьте прокси /routing и ключ OPENROUTE_API_KEY).");
         return;
       }
+      setRouteSteps(extractInstructionSteps(data));
+      const feat0 = data.features?.[0];
+      const summ = (feat0?.properties as { summary?: { distance?: number; duration?: number } } | undefined)?.summary;
+      const distM = summ?.distance ?? 0;
+      const durS = summ?.duration ?? 0;
+      if (requestProfile === "wheelchair" && (distM > 7000 || durS > 45 * 60)) {
+        setWheelchairLongWarn(true);
+      }
+      const km0 = distM > 0 ? (distM / 1000).toFixed(2) : "?";
+      const min0 = durS > 0 ? Math.round(durS / 60) : null;
+      setRouteSummaryText(
+        min0 != null ? `Маршрут: ~${km0} км, ~${min0} мин` : `Маршрут: ~${km0} км`,
+      );
       const routeBasesAll = routeFeaturesFromOrs(data);
       const routeFeaturesRaw: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       for (const f of routeBasesAll) {
@@ -950,7 +1018,7 @@ export function RouteMapWidget() {
           </button>
         </div>
         <p className="muted small">
-          Клик по слоям карты (синие и оранжевые точки) — подсказка об объекте. Точки маршрута на карте ставятся только после нажатия кнопок выше.
+          Синие точки — объекты онтологии: нажмите точку и выберите «Откуда» или «Куда». Оранжевые — объекты OSM. Иначе укажите точки кнопками «На карте» выше.
         </p>
         <label className="muted small" style={{ display: "block", marginBottom: 8 }}>
           <input
@@ -971,12 +1039,26 @@ export function RouteMapWidget() {
           Строить маршрут от моего местоположения (в реальном времени)
         </label>
         <div className="field">
-          <label>Профиль ORS</label>
-          <select value={profile} onChange={(e) => setProfile(e.target.value)}>
-            <option value="wheelchair">Колясочник (wheelchair)</option>
-            <option value="foot-walking">Пешеход</option>
-            <option value="driving-car">Авто</option>
-          </select>
+          <label>Профиль маршрута</label>
+          <div className="profile-picker" role="group" aria-label="Профиль OpenRouteService">
+            {[
+              { id: "wheelchair", label: "Коляска", emoji: "♿" },
+              { id: "foot-walking", label: "Пешком", emoji: "🚶" },
+              { id: "driving-car", label: "Авто", emoji: "🚗" },
+            ].map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`profile-tile ${profile === p.id ? "active" : ""}`}
+                onClick={() => setProfile(p.id)}
+              >
+                <span className="profile-emoji" aria-hidden>
+                  {p.emoji}
+                </span>
+                <span>{p.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="field">
           <label>Вариантов маршрута</label>
@@ -1002,6 +1084,34 @@ export function RouteMapWidget() {
       </aside>
       <div className="map-wrap">
         <div ref={mapEl} className="map-canvas" />
+        {(routeSteps.length > 0 || routeSummaryText) && (
+          <div className="route-instructions-overlay" aria-live="polite">
+            {wheelchairLongWarn && (
+              <div className="wheelchair-route-warn">
+                Внимание: маршрут для коляски длиннее 7 км или дольше 45 минут — оцените силы и при необходимости разбейте
+                поездку на части.
+              </div>
+            )}
+            <h4>Маршрут</h4>
+            {routeSummaryText && <p className="route-summary-line muted">{routeSummaryText}</p>}
+            {routeSteps.length > 0 ? (
+              <ol className="route-steps-list">
+                {routeSteps.map((s, i) => (
+                  <li key={`${i}-${s.instruction.slice(0, 24)}`}>
+                    <span className="route-step-text">{s.instruction}</span>
+                    {s.distanceM != null && s.distanceM > 0 && (
+                      <span className="route-step-dist">{Math.round(s.distanceM)} м</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="muted small" style={{ margin: 0 }}>
+                Пошаговые указания недоступны в этом ответе сервиса — на карте показана линия маршрута.
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

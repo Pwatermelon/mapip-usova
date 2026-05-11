@@ -14,6 +14,8 @@ export type AuthUser = {
   name?: string;
   email?: string;
   score?: number;
+  /** 1 — администратор / эксперт (панель эксперта, статистика). Остальные — обычные пользователи. */
+  type?: number;
 };
 
 type AuthContextValue = {

@@ -649,9 +649,105 @@ button.btn-ghost {
 }
 
 .map-wrap {
+  position: relative;
   border: 2px solid #b8dafd;
   border-radius: 10px;
   overflow: hidden;
+}
+
+/* Пошаговый маршрут в углу карты (маршрутизатор) */
+.route-instructions-overlay {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  left: auto;
+  max-width: min(320px, 46vw);
+  max-height: min(46vh, 380px);
+  overflow: auto;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #b8dafd;
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  font-size: 0.84rem;
+}
+.route-instructions-overlay h4 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+.route-summary-line {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+}
+.route-steps-list {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+.route-steps-list li {
+  margin-bottom: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.route-step-text {
+  flex: 1;
+  min-width: 0;
+}
+.route-step-dist {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+.wheelchair-route-warn {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+.profile-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-tile {
+  flex: 1;
+  min-width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px;
+  border: 2px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.76rem;
+}
+.profile-tile.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.profile-emoji {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+.ontology-route-popup {
+  min-width: 160px;
+}
+.ontology-route-popup-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.ontology-route-popup-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .map-wrap .maplibregl-ctrl-attrib {
@@ -686,7 +782,8 @@ button.btn-ghost {
 }
 
 .embedded-router-section .map-layout {
-  height: calc(100vh - 220px);
+  height: min(calc(100vh - 240px), 920px);
+  max-height: calc(100vh - 200px);
 }
 
 .info-page h2 {
