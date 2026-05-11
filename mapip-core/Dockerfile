@@ -4,7 +4,7 @@ COPY mapip-core/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY mapip-core/app ./app
 RUN mkdir -p /app/data/ontology
-COPY data/ontology/Ontology_Social_objects_new.rdf /app/data/ontology/
+COPY mapip-core/data/ontology/Ontology_Social_objects_new.rdf /app/data/ontology/
 ENV PYTHONUNBUFFERED=1
 ENV ONTOLOGY_PATH=/app/data/ontology/Ontology_Social_objects_new.rdf
 EXPOSE 8000
