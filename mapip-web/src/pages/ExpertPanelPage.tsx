@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fetchJson } from "../api";
+import { coreBase, fetchJson } from "../api";
 
 type CommentRow = { id: number; text: string; rate: number; user?: { name: string }; date?: string };
 type UserRow = { id: number; name?: string; email: string; type?: number; password?: string };
@@ -32,7 +32,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const data = await fetchJson<PendingRow[]>("/api/Expert/pending");
+      const data = await fetchJson<PendingRow[]>(`${coreBase}/api/Expert/pending`);
       setPending(data);
       const m: Record<number, PendingRow> = {};
       for (const p of data) m[p.id] = { ...p };
@@ -47,7 +47,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(`/api/Expert/${id}/approve`, { method: "POST" });
+      const res = await fetch(`${coreBase}/api/Expert/${id}/approve`, { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       setOk("Объект одобрен и добавлен на карту.");
       await loadPending();
@@ -60,7 +60,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(`/api/Expert/${id}/reject`, { method: "POST" });
+      const res = await fetch(`${coreBase}/api/Expert/${id}/reject`, { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       setOk("Заявка отклонена.");
       await loadPending();
@@ -75,7 +75,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(`/api/Expert/${id}/edit`, {
+      const res = await fetch(`${coreBase}/api/Expert/${id}/edit`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -109,7 +109,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const u = await fetchJson<UserRow>(`/api/users/GetUser/${encodeURIComponent(usersEmail.trim())}`);
+      const u = await fetchJson<UserRow>(`${coreBase}/api/users/GetUser/${encodeURIComponent(usersEmail.trim())}`);
       setUser(u);
     } catch (e) {
       setErr(`Пользователь не найден: ${String(e)}`);
@@ -121,7 +121,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(`/api/comment/EditComment/${row.id}`, {
+      const res = await fetch(`${coreBase}/api/comment/EditComment/${row.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ newText: row.text, newRate: row.rate }),
@@ -137,7 +137,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(`/api/comment/DeleteComment/${id}`, { method: "DELETE" });
+      const res = await fetch(`${coreBase}/api/comment/DeleteComment/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
       setComments((prev) => prev.filter((c) => c.id !== id));
       setOk("Комментарий удален.");
@@ -151,7 +151,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(`/api/users/EditUser/${user.id}`, {
+      const res = await fetch(`${coreBase}/api/users/EditUser/${user.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: user.email, category: user.type ?? 0, password: user.password ?? "" }),
@@ -168,7 +168,7 @@ export function ExpertPanelPage() {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(`/api/users/DeleteUser/${user.id}`, { method: "DELETE" });
+      const res = await fetch(`${coreBase}/api/users/DeleteUser/${user.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
       setUser(null);
       setOk("Пользователь удален.");
@@ -276,10 +276,14 @@ export function ExpertPanelPage() {
       <hr />
       <h3>Комментарии и пользователи</h3>
       <div className="field-row" style={{ marginBottom: 8 }}>
-        <button type="button" className="btn" onClick={() => void loadComments("/api/comment/GetLastComments")}>
+        <button type="button" className="btn" onClick={() => void loadComments(`${coreBase}/api/comment/GetLastComments`)}>
           Загрузить последние комментарии
         </button>
-        <button type="button" className="btn btn-ghost" onClick={() => void loadComments("/api/comment/GetOffensiveComments")}>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => void loadComments(`${coreBase}/api/comment/GetOffensiveComments`)}
+        >
           Загрузить оскорбительные
         </button>
       </div>
@@ -288,7 +292,11 @@ export function ExpertPanelPage() {
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => void loadComments(`/api/comment/GetCommentsByMapObject/${encodeURIComponent(commentSearch.trim())}`)}
+          onClick={() =>
+            void loadComments(
+              `${coreBase}/api/comment/GetCommentsByMapObject/${encodeURIComponent(commentSearch.trim())}`,
+            )
+          }
         >
           Поиск комментариев
         </button>

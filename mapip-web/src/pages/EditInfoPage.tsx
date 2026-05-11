@@ -132,7 +132,7 @@ export function EditInfoPage() {
     setErr(null);
     setMsg(null);
     try {
-      const res = await fetch("/client/AddMapObject", { method: "POST", body: fd, credentials: "include" });
+      const res = await fetch(`${coreBase}/client/AddMapObject`, { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
       setMsg("Изменения отправлены.");
     } catch (e) {

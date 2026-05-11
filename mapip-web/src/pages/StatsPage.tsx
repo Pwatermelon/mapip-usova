@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchJson } from "../api";
+import { coreBase, fetchJson } from "../api";
 
 type SettingsDto = {
   rnValue?: number;
@@ -35,7 +35,7 @@ export function StatsPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const s = await fetchJson<SettingsDto>("/api/admin/GetSettings");
+        const s = await fetchJson<SettingsDto>(`${coreBase}/api/admin/GetSettings`);
         const rn = s.rnValue ?? s.RnValue ?? 4;
         setRnValue(rn);
         setCronExpression(s.cronExpression ?? s.CronExpression ?? "0 0 * * *");
@@ -44,13 +44,13 @@ export function StatsPage() {
         // keep defaults
       }
       try {
-        const i = await fetchJson<InfraDto>("/api/admin/get/infrastructure");
+        const i = await fetchJson<InfraDto>(`${coreBase}/api/admin/get/infrastructure`);
         setInfra(i);
       } catch {
         setInfra({});
       }
       try {
-        const st = await fetchJson<StatisticsDto>("/api/Statistics");
+        const st = await fetchJson<StatisticsDto>(`${coreBase}/api/Statistics`);
         setStats(st);
         setStatsErr(null);
       } catch {
@@ -59,9 +59,11 @@ export function StatsPage() {
       }
       try {
         const [objects, comments, popular] = await Promise.all([
-          fetchJson<{ id: number }[]>("/GetSocialMapObject"),
-          fetchJson<{ id: number }[]>("/api/comment/GetLastComments"),
-          fetchJson<{ mapObject: { id: number } }[] | { id: number }[]>("/api/recommendation/GetPopularRecommendations"),
+          fetchJson<{ id: number }[]>(`${coreBase}/GetSocialMapObject`),
+          fetchJson<{ id: number }[]>(`${coreBase}/api/comment/GetLastComments`),
+          fetchJson<{ mapObject: { id: number } }[] | { id: number }[]>(
+            `${coreBase}/api/recommendation/GetPopularRecommendations`,
+          ),
         ]);
         const popularRows =
           Array.isArray(popular) && popular.length > 0 && typeof popular[0] === "object" && popular[0] !== null && "mapObject" in popular[0]
@@ -109,17 +111,17 @@ export function StatsPage() {
     setErr(null);
     setMsg(null);
     try {
-      await fetch("/api/admin/settings/UpdateRnValue", {
+      await fetch(`${coreBase}/api/admin/settings/UpdateRnValue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ RnValue: rnValue }),
       });
-      await fetch("/api/admin/settings/UpdateCronExpression", {
+      await fetch(`${coreBase}/api/admin/settings/UpdateCronExpression`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ CronExpression: cronExpression }),
       });
-      await fetch("/api/admin/settings/UpdateExcludedCategories", {
+      await fetch(`${coreBase}/api/admin/settings/UpdateExcludedCategories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ExcludedCategories: excluded }),

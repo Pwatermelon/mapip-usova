@@ -1,7 +1,7 @@
 import maplibregl from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../AuthContext";
-import { fetchJson, routingBase } from "../api";
+import { coreBase, fetchJson, routingBase } from "../api";
 
 type InfraDict = Record<string, string[]>;
 
@@ -31,13 +31,13 @@ export function AddInfoPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const accRes = await fetch("/api/SocialMapObject/get/accessibility");
+        const accRes = await fetch(`${coreBase}/api/SocialMapObject/get/accessibility`);
         if (accRes.ok) setAccessibility((await accRes.json()) as string[]);
       } catch {
         setAccessibility([]);
       }
       try {
-        const infRes = await fetch("/api/admin/get/infrastructure");
+        const infRes = await fetch(`${coreBase}/api/admin/get/infrastructure`);
         if (infRes.ok) setInfrastructure((await infRes.json()) as InfraDict);
       } catch {
         setInfrastructure({});
@@ -131,7 +131,7 @@ export function AddInfoPage() {
       fd.append("excluded", "false");
     }
     try {
-      const res = await fetch("/client/AddMapObject", { method: "POST", body: fd, credentials: "include" });
+      const res = await fetch(`${coreBase}/client/AddMapObject`, { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
       setMsg("Объект отправлен.");
     } catch (e) {

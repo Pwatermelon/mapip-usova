@@ -32,11 +32,6 @@ type OntologyInfo = {
 type RecommendationRow = { mapObject: MapObject; distance?: number };
 type Mode = "search" | "personal" | "popular" | "likes";
 type OrsGeoJson = GeoJSON.FeatureCollection & { features?: GeoJSON.Feature[] };
-const DEMO_OBJECTS: MapObject[] = [
-  { id: 80001, x: 51.533557, y: 46.034257, display_name: "Театр оперы (demo)", adress: "Саратов, центр", type: "Культура" },
-  { id: 80002, x: 51.5293, y: 46.0201, display_name: "Городской парк (demo)", adress: "Саратов, парк", type: "Туризм" },
-  { id: 80003, x: 51.5402, y: 46.0418, display_name: "Ж/д вокзал (demo)", adress: "Саратов, вокзал", type: "Транспортная инфраструктура" },
-];
 
 const disabilityLabels: Record<string, string> = {
   Г: "Для людей с нарушением слуха",
@@ -189,10 +184,17 @@ export function MapPage() {
     void (async () => {
       try {
         const data = await fetchJson<MapObject[]>(`${coreBase}/GetSocialMapObject`);
-        setObjects(data.length ? data : DEMO_OBJECTS);
+        setObjects(Array.isArray(data) ? data : []);
+        if (data.length) {
+          setErr(null);
+        } else {
+          setErr(
+            "Список объектов пуст или онтология не загружена на сервере (503). Проверьте ONTOLOGY_PATH и лог mapip-core.",
+          );
+        }
       } catch (e) {
-        setObjects(DEMO_OBJECTS);
-        setErr(`Основной API недоступен, показаны demo-объекты. ${String(e)}`);
+        setObjects([]);
+        setErr(`Не удалось загрузить объекты из онтологии (GetSocialMapObject). ${String(e)}`);
       }
     })();
   }, []);
@@ -303,7 +305,7 @@ export function MapPage() {
     void (async () => {
       try {
         const body = new URLSearchParams({ iri });
-        const res = await fetch("/client/getOntologyInfo", {
+        const res = await fetch(`${coreBase}/client/getOntologyInfo`, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body,

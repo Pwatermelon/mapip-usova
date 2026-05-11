@@ -4,11 +4,6 @@ import { coreBase, errorTextFromResponse, fetchJson, routingBase } from "../api"
 
 type MapObject = { id: number; x: number; y: number; display_name: string };
 type OrsGeoJson = GeoJSON.FeatureCollection & { features?: GeoJSON.Feature[] };
-const DEMO_OBJECTS: MapObject[] = [
-  { id: 90001, x: 51.533557, y: 46.034257, display_name: "Театр оперы (demo)" },
-  { id: 90002, x: 51.5293, y: 46.0201, display_name: "Городской парк (demo)" },
-  { id: 90003, x: 51.5402, y: 46.0418, display_name: "Ж/д вокзал (demo)" },
-];
 
 function lineCoordsFromOrs(data: OrsGeoJson): number[][] {
   const out: number[][] = [];
@@ -314,9 +309,15 @@ export function RouteMapWidget() {
     void (async () => {
       try {
         const data = await fetchJson<MapObject[]>(`${coreBase}/GetSocialMapObject`);
-        setObjects(data.length ? data : DEMO_OBJECTS);
-      } catch {
-        setObjects(DEMO_OBJECTS);
+        setObjects(Array.isArray(data) ? data : []);
+        if (data.length) {
+          setErr(null);
+        } else {
+          setErr("Объекты маршрутизатора: пустой список или онтология не загружена (см. ONTOLOGY_PATH / лог core).");
+        }
+      } catch (e) {
+        setObjects([]);
+        setErr(`Не удалось загрузить объекты из онтологии: ${String(e)}`);
       }
     })();
   }, []);

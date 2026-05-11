@@ -17,15 +17,39 @@ def ontology_objects_cached() -> list[dict[str, Any]]:
 
 
 def resolve_map_object_dict(db: Session, object_id: int) -> dict[str, Any] | None:
-    """Один объект в формате фронта (как map_object_to_json / SPARQL-лист)."""
+    """
+    Каноническое представление объекта для UI: в первую очередь из онтологии.
+    Положительный id из БД: если у строки MapObject тот же IRI, что у индивида в RDF — отдаём
+    запись из онтологии (те же id/x/y, что и на карте), а не «сырой» MapObject.
+    """
     from app.serializers import map_object_to_json
+
+    objs = ontology_objects_cached()
+    by_id: dict[int, dict[str, Any]] = {}
+    by_iri: dict[str, dict[str, Any]] = {}
+    for o in objs:
+        oid = o.get("id")
+        if oid is not None:
+            try:
+                by_id[int(oid)] = o
+            except (TypeError, ValueError):
+                pass
+        iri = (o.get("iri") or "").strip()
+        if iri:
+            by_iri[iri] = o
+
+    if object_id in by_id:
+        return by_id[object_id]
 
     if object_id > 0:
         m = db.query(MapObject).filter(MapObject.Id == object_id).first()
-        return map_object_to_json(m) if m else None
-    for o in ontology_objects_cached():
-        if int(o.get("id", 0)) == object_id:
-            return o
+        if not m:
+            return None
+        iri = (m.IRI or "").strip()
+        if iri and iri in by_iri:
+            return by_iri[iri]
+        return map_object_to_json(m)
+
     return None
 
 

@@ -43,8 +43,13 @@ def load_graph(ontology_path: Path) -> Graph | None:
         g = Graph()
         try:
             g.parse(path.as_posix(), format="xml")
-        except ParserError as e:
-            log.exception("Ошибка парсинга онтологии: %s", e)
+        except ParserError:
+            log.exception("Ошибка парсинга RDF/XML (ParserError)")
+            _GRAPH = None
+            _GRAPH_PATH = None
+            return None
+        except Exception:
+            log.exception("Ошибка загрузки онтологии (не ParserError — например OSError, повреждённый XML)")
             _GRAPH = None
             _GRAPH_PATH = None
             return None
