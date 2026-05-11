@@ -1042,9 +1042,9 @@ export function RouteMapWidget() {
           <label>Профиль маршрута</label>
           <div className="profile-picker" role="group" aria-label="Профиль OpenRouteService">
             {[
-              { id: "wheelchair", label: "Коляска", emoji: "♿" },
-              { id: "foot-walking", label: "Пешком", emoji: "🚶" },
-              { id: "driving-car", label: "Авто", emoji: "🚗" },
+              { id: "wheelchair", title: "Колясочный", hint: "wheelchair" },
+              { id: "foot-walking", title: "Пешком", hint: "foot-walking" },
+              { id: "driving-car", title: "Автомобиль", hint: "driving-car" },
             ].map((p) => (
               <button
                 key={p.id}
@@ -1052,10 +1052,8 @@ export function RouteMapWidget() {
                 className={`profile-tile ${profile === p.id ? "active" : ""}`}
                 onClick={() => setProfile(p.id)}
               >
-                <span className="profile-emoji" aria-hidden>
-                  {p.emoji}
-                </span>
-                <span>{p.label}</span>
+                <span className="profile-tile-title">{p.title}</span>
+                <span className="profile-tile-hint">{p.hint}</span>
               </button>
             ))}
           </div>
