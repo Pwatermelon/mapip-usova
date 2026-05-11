@@ -109,10 +109,20 @@ export function MapPage() {
 
   objectsRef.current = objects;
 
+  /**
+   * Карта создаётся только на вкладке «Карта доступности». При переключении на маршрутизатор
+   * контейнер размонтируется — старый экземпляр MapLibre нужно удалить; при возврате — создать заново.
+   * Иначе карта «пропадает»: экземпляр остаётся привязанным к уничтоженному DOM.
+   */
   useEffect(() => {
-    if (!mapEl.current) return;
+    if (mapTab !== "objects") {
+      return;
+    }
+    const el = mapEl.current;
+    if (!el) return;
+
     const map = new maplibregl.Map({
-      container: mapEl.current,
+      container: el,
       style: {
         version: 8,
         sources: {
@@ -139,7 +149,7 @@ export function MapPage() {
       setSelected(obj);
     };
 
-    map.on("load", () => {
+    const onLoad = () => {
       map.addSource("objects", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -168,16 +178,21 @@ export function MapPage() {
         paint: { "line-color": "#22c55e", "line-width": 5, "line-opacity": 0.9 },
       });
       map.on("click", onClick);
+      map.resize();
+      requestAnimationFrame(() => map.resize());
       setMapReady(true);
-    });
+    };
+
+    map.once("load", onLoad);
 
     return () => {
       setMapReady(false);
+      map.off("load", onLoad);
       map.off("click", onClick);
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [mapTab]);
 
   useEffect(() => {
     void (async () => {
