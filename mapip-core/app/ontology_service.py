@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 from pathlib import Path
@@ -116,6 +117,77 @@ def list_accessibility_elements(g: Graph) -> list[str]:
             if v is not None:
                 out.append(_uri_to_label(v))
     return sorted(set(out))
+
+
+def ontology_object_id(iri: str) -> int:
+    """Стабильный отрицательный id (не пересекается с положительными Id из PostgreSQL)."""
+    h = int(hashlib.sha256(iri.encode("utf-8")).hexdigest()[:12], 16)
+    return -(h % 900_000_000 + 1)
+
+
+def _literal_float(val: Any) -> float | None:
+    if val is None:
+        return None
+    try:
+        return float(val)  # rdflib Literal
+    except (TypeError, ValueError):
+        pass
+    s = str(val).split("^")[0].strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def list_map_objects_from_ontology(g: Graph) -> list[dict[str, Any]]:
+    """
+    Индивиды с X, Y и типом (как legacy GET /GetOntologyObjects / SPARQL в SocialMapObjectController).
+    Формат совпадает с map_object_to_json для фронта.
+    """
+    q = """
+        PREFIX obj: <http://www.semanticweb.org/алексей/ontologies/2023/8/untitled-ontology-44#>
+        SELECT ?object ?x ?y ?type
+        WHERE {
+            ?object obj:X ?x .
+            ?object obj:Y ?y .
+            ?object obj:является ?type .
+        }
+    """
+    out: list[dict[str, Any]] = []
+    seen_iris: set[str] = set()
+    for row in g.query(q):
+        if len(row) < 4:
+            continue
+        obj_node, xv, yv, type_node = row[0], row[1], row[2], row[3]
+        iri = str(obj_node)
+        if iri in seen_iris:
+            continue
+        seen_iris.add(iri)
+        x = _literal_float(xv)
+        y = _literal_float(yv)
+        if x is None or y is None:
+            continue
+        type_label = _uri_to_label(type_node)
+        display = _uri_to_label(obj_node)
+        oid = ontology_object_id(iri)
+        out.append(
+            {
+                "id": oid,
+                "x": x,
+                "y": y,
+                "display_name": display,
+                "iri": iri,
+                "adress": "Данные из онтологии",
+                "description": None,
+                "images": "Нет изображения",
+                "type": type_label,
+                "rating": None,
+                "workingHours": None,
+                "createdAt": None,
+                "updatedAt": None,
+            }
+        )
+    return out
 
 
 def infrastructure_by_type(g: Graph) -> dict[str, list[str]]:
