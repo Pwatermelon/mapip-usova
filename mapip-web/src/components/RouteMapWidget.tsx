@@ -1,6 +1,7 @@
 import maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { coreBase, errorTextFromResponse, fetchJson, routingBase } from "../api";
+import { IconCar, IconWalking, IconWheelchair } from "./ProfileModeIcons";
 
 type MapObject = { id: number; x: number; y: number; display_name: string };
 type OrsGeoJson = GeoJSON.FeatureCollection & { features?: GeoJSON.Feature[] };
@@ -263,20 +264,34 @@ function hasOrs2007(text: string): boolean {
 
 export type RouteInstructionStep = { instruction: string; distanceM?: number };
 
+function instructionTextFromOrsStep(step: Record<string, unknown>): string {
+  const ins = step.instruction;
+  if (typeof ins === "string" && ins.trim()) return ins.trim();
+  if (ins && typeof ins === "object" && "text" in ins && typeof (ins as { text?: unknown }).text === "string") {
+    return String((ins as { text: string }).text).trim();
+  }
+  if (typeof step.name === "string" && step.name.trim()) return step.name.trim();
+  return "";
+}
+
 /** Пошаговые подсказки из GeoJSON OpenRouteService (properties.segments[].steps[]). */
 function extractInstructionSteps(data: OrsGeoJson): RouteInstructionStep[] {
   const out: RouteInstructionStep[] = [];
   const feat = data.features?.[0];
   if (!feat?.properties || typeof feat.properties !== "object") return out;
   const props = feat.properties as {
-    segments?: { steps?: { instruction?: string; distance?: number }[] }[];
+    segments?: { steps?: Record<string, unknown>[] }[];
   };
   for (const seg of props.segments ?? []) {
     for (const step of seg.steps ?? []) {
-      const ins = step.instruction;
-      if (ins != null && String(ins).trim()) {
-        out.push({ instruction: String(ins), distanceM: step.distance });
-      }
+      const text = instructionTextFromOrsStep(step);
+      if (!text) continue;
+      const distRaw = step.distance;
+      const distanceM = typeof distRaw === "number" ? distRaw : Number(distRaw);
+      out.push({
+        instruction: text,
+        distanceM: Number.isFinite(distanceM) ? distanceM : undefined,
+      });
     }
   }
   return out;
@@ -1042,9 +1057,9 @@ export function RouteMapWidget() {
           <label>Профиль маршрута</label>
           <div className="profile-picker" role="group" aria-label="Профиль OpenRouteService">
             {[
-              { id: "wheelchair", title: "Колясочный", hint: "wheelchair" },
-              { id: "foot-walking", title: "Пешком", hint: "foot-walking" },
-              { id: "driving-car", title: "Автомобиль", hint: "driving-car" },
+              { id: "wheelchair", title: "Колясочный", Icon: IconWheelchair },
+              { id: "foot-walking", title: "Пешком", Icon: IconWalking },
+              { id: "driving-car", title: "Авто", Icon: IconCar },
             ].map((p) => (
               <button
                 key={p.id}
@@ -1052,8 +1067,8 @@ export function RouteMapWidget() {
                 className={`profile-tile ${profile === p.id ? "active" : ""}`}
                 onClick={() => setProfile(p.id)}
               >
+                <p.Icon className="profile-mode-svg" />
                 <span className="profile-tile-title">{p.title}</span>
-                <span className="profile-tile-hint">{p.hint}</span>
               </button>
             ))}
           </div>
@@ -1105,7 +1120,8 @@ export function RouteMapWidget() {
               </ol>
             ) : (
               <p className="muted small" style={{ margin: 0 }}>
-                Пошаговые указания недоступны в этом ответе сервиса — на карте показана линия маршрута.
+                Пошаговый список не пришёл от сервиса маршрутов (проверьте деплой mapip-routing и OPENROUTE_API_KEY). Линия на карте
+                построена.
               </p>
             )}
           </div>

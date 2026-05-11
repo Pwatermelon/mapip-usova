@@ -361,18 +361,83 @@ async def _build_offset_alternatives(
 
 
 async def _post_ors_json_geo(profile: str, payload: dict[str, Any]) -> httpx.Response:
-    # Fallback на json endpoint ORS.
-    url = f"https://api.openrouteservice.org/v2/directions/{profile}"
+    # Fallback на JSON endpoint ORS (явные пошаговые указания — иначе фронт не показывает список поворотов).
+    url = f"https://api.openrouteservice.org/v2/directions/{profile}/json"
     params = {"api_key": settings.openroute_api_key}
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     body = {
         **payload,
-        "instructions": False,
+        "instructions": True,
         "elevation": False,
         "geometry_simplify": False,
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         return await client.post(url, params=params, headers=headers, json=body)
+
+
+async def _post_ors_json_instructions_only(profile: str, coordinates: list[list[float]]) -> dict[str, Any] | None:
+    """Один маршрут с пошаговыми инструкциями (без alternative_routes), для подмешивания в GeoJSON."""
+    url = f"https://api.openrouteservice.org/v2/directions/{profile}/json"
+    params = {"api_key": settings.openroute_api_key}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    body: dict[str, Any] = {
+        "coordinates": coordinates,
+        "instructions": True,
+        "elevation": False,
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(url, params=params, headers=headers, json=body)
+    if _is_ors_rate_limited(r) or not r.is_success or _has_ors_2007(r.text):
+        return None
+    try:
+        return r.json()
+    except Exception:
+        return None
+
+
+def _geojson_first_feature_has_steps(fc: dict[str, Any]) -> bool:
+    feats = fc.get("features") or []
+    if not feats:
+        return False
+    props = feats[0].get("properties") or {}
+    for seg in props.get("segments") or []:
+        if not isinstance(seg, dict):
+            continue
+        steps = seg.get("steps")
+        if isinstance(steps, list) and len(steps) > 0:
+            return True
+    return False
+
+
+async def _ensure_geojson_has_instructions(
+    fc: dict[str, Any],
+    profile: str,
+    coordinates: list[list[float]],
+) -> dict[str, Any]:
+    """
+    GeoJSON от ORS при alternative_routes часто без steps; добираем segments из /json с instructions.
+    Подмешиваем только в первый feature (основной маршрут).
+    """
+    if _geojson_first_feature_has_steps(fc):
+        return fc
+    data = await _post_ors_json_instructions_only(profile, coordinates)
+    if not data:
+        return fc
+    routes = data.get("routes") or []
+    if not routes:
+        return fc
+    route0 = routes[0]
+    segments = route0.get("segments") or []
+    summary = route0.get("summary") or {}
+    feats = list(fc.get("features") or [])
+    if not feats:
+        return fc
+    p = dict(feats[0].get("properties") or {})
+    p["segments"] = segments
+    if summary:
+        p["summary"] = summary
+    feats[0] = {**feats[0], "properties": p}
+    return {**fc, "features": feats}
 
 
 def _decode_polyline(encoded: str, precision: int = 5) -> list[list[float]]:
@@ -536,7 +601,7 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             raise HTTPException(status_code=r_json.status_code, detail=r_json.text[:2000])
         main_geo = _json_route_to_geojson(r_json.json())
         if alt <= 1:
-            return main_geo
+            return await _ensure_geojson_has_instructions(main_geo, profile, coordinates)
 
         # Реальные альтернативы через разные точки доступной инфраструктуры.
         min_lon, min_lat, max_lon, max_lat = _bbox_for_points(coordinates)
@@ -573,15 +638,16 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
                 max_ors_posts=8,
             )
             routes.extend(extras)
-        return _merge_geojson_features(routes[:alt])
+        merged = _merge_geojson_features(routes[:alt])
+        return await _ensure_geojson_has_instructions(merged, profile, coordinates)
 
     base_geo = r.json()
     if alt <= 1:
-        return base_geo
+        return await _ensure_geojson_has_instructions(base_geo, profile, coordinates)
     # Если ORS вернул меньше альтернатив, чем просили, добавляем через POI.
     have = len(base_geo.get("features", []))
     if have >= alt:
-        return base_geo
+        return await _ensure_geojson_has_instructions(base_geo, profile, coordinates)
     min_lon, min_lat, max_lon, max_lat = _bbox_for_points(coordinates)
     candidates = await _fetch_accessibility_candidates(
         min_lon=min_lon,
@@ -616,7 +682,8 @@ async def directions_geojson(body: dict[str, Any] = Body(...)) -> Any:
             max_ors_posts=8,
         )
         routes.extend(extras)
-    return _merge_geojson_features(routes[:alt])
+    merged = _merge_geojson_features(routes[:alt])
+    return await _ensure_geojson_has_instructions(merged, profile, coordinates)
 
 
 @app.get("/v1/overpass/objects")

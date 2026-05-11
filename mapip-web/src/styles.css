@@ -733,6 +733,15 @@ button.btn-ghost {
   border-color: #2563eb;
   background: #eff6ff;
 }
+.profile-mode-svg {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  color: #64748b;
+}
+.profile-tile.active .profile-mode-svg {
+  color: #2563eb;
+}
 .profile-tile-title {
   font-weight: 600;
   font-size: 0.78rem;
