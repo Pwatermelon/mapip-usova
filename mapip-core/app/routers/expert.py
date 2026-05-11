@@ -1,4 +1,4 @@
-"""Модерация объектов на карте (legacy ExpertController)."""
+"""Модерация объектов на карте (очередь Pending)."""
 
 from __future__ import annotations
 

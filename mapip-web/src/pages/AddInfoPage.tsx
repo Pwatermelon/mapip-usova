@@ -133,7 +133,7 @@ export function AddInfoPage() {
     try {
       const res = await fetch(`${coreBase}/client/AddMapObject`, { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
-      setMsg("Объект отправлен.");
+      setMsg("Заявка отправлена на модерацию. После проверки экспертом объект появится на карте.");
     } catch (e) {
       setErr(`Не удалось отправить: ${String(e)}. Проверьте доступность legacy endpoint /client/AddMapObject.`);
     }

@@ -11,6 +11,7 @@ from app.config import settings
 from app.db import get_db
 from app.map_object_resolve import filter_ontology_objects, list_recommendation_objects
 from app.models import AdminSetting, MapObject, PendingSocialMapObject, User
+from app.pending_guest_user import get_submitter_for_pending
 from app.ontology_service import get_graph, get_ontology_info, infrastructure_by_type, list_accessibility_elements
 
 router = APIRouter(tags=["legacy-compat"])
@@ -223,43 +224,25 @@ async def add_or_edit_map_object(
         except ValueError:
             map_link = None
 
-    if user_row is not None:
-        pending = PendingSocialMapObject(
-            DisplayName=name,
-            Address=address,
-            X=lat,
-            Y=lon,
-            Type=obj_type,
-            Description=description,
-            DisabilityCategory=",".join(disability) if disability else None,
-            WorkingHours=working_hours,
-            Accessibility=",".join(accessibility) if accessibility else None,
-            Images=",".join(image_names) if image_names else None,
-            Excluded=excluded,
-            MapObjectLinkId=map_link,
-            DateAdded=now,
-            Status="Pending",
-            UserId=user_row.Id,
-        )
-        db.add(pending)
-        db.commit()
-        return {"message": "ok"}
-
-    row = MapObject(
-        X=x_val,
-        Y=y_val,
-        Display_name=name,
-        IRI=f"generated:{name}:{int(now.timestamp())}",
-        Adress=address,
-        Description=description,
-        Images="Нет изображения",
+    submitter = get_submitter_for_pending(db, user_row)
+    pending = PendingSocialMapObject(
+        DisplayName=name,
+        Address=address,
+        X=float(x_val),
+        Y=float(y_val),
         Type=obj_type,
-        Rating=0,
+        Description=description,
+        DisabilityCategory=",".join(disability) if disability else None,
         WorkingHours=working_hours,
-        CreatedAt=now,
-        UpdatedAt=now,
+        Accessibility=",".join(accessibility) if accessibility else None,
+        Images=",".join(image_names) if image_names else None,
+        Excluded=excluded,
+        MapObjectLinkId=map_link,
+        DateAdded=now,
+        Status="Pending",
+        UserId=submitter.Id,
     )
-    db.add(row)
+    db.add(pending)
     db.commit()
     return {"message": "ok"}
 

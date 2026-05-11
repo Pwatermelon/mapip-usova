@@ -33,6 +33,7 @@ async def lifespan(_app: FastAPI):
     from app.db import Base, SessionLocal, engine
     from app.models import AdminSetting, User
     from app.ontology_service import load_graph
+    from app.pending_guest_user import seed_guest_submitter_if_needed
 
     Base.metadata.create_all(bind=engine)
     _migrate_db_for_ontology_object_ids(engine)
@@ -47,6 +48,7 @@ async def lifespan(_app: FastAPI):
                 )
             )
             db.commit()
+        seed_guest_submitter_if_needed(db)
         if settings.seed_dev_admin:
             email = settings.dev_admin_email.strip()
             if email and db.query(User).filter(User.Email == email).first() is None:

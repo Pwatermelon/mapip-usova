@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { coreBase, fetchJson } from "../api";
 
 type CommentRow = { id: number; text: string; rate: number; user?: { name: string }; date?: string };
@@ -28,7 +28,7 @@ export function ExpertPanelPage() {
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
-  const loadPending = async () => {
+  const loadPending = useCallback(async () => {
     setErr(null);
     setOk(null);
     try {
@@ -41,7 +41,11 @@ export function ExpertPanelPage() {
       setErr(`Очередь объектов: ${String(e)}`);
       setPending([]);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void loadPending();
+  }, [loadPending]);
 
   const approvePending = async (id: number) => {
     setErr(null);
@@ -101,7 +105,7 @@ export function ExpertPanelPage() {
       const data = await fetchJson<CommentRow[]>(path);
       setComments(data);
     } catch (e) {
-      setErr(`Комментарии не загрузились: ${String(e)} (legacy endpoint).`);
+      setErr(`Комментарии не загрузились: ${String(e)}`);
     }
   };
 
@@ -180,13 +184,13 @@ export function ExpertPanelPage() {
   return (
     <section className="info-page">
       <h2>Панель эксперта</h2>
-      <h3>Модерация новых объектов (legacy ExpertController)</h3>
+      <h3>Модерация новых объектов</h3>
       <p className="muted" style={{ marginBottom: 8 }}>
-        Заявки со статусом Pending: одобрение создаёт запись в `MapObject`, отклонение помечает заявку как Rejected.
+        Заявки со статусом Pending: одобрение создаёт запись на карте, отклонение помечает заявку как Rejected.
       </p>
       <div className="field-row" style={{ marginBottom: 12 }}>
         <button type="button" className="btn" onClick={() => void loadPending()}>
-          Загрузить очередь
+          Обновить очередь
         </button>
       </div>
       {pending.map((p) => {

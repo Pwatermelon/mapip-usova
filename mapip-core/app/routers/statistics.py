@@ -1,8 +1,8 @@
-"""Статистика модерации и объектов (legacy StatisticsController)."""
+"""Статистика модерации и объектов карты."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -17,6 +17,7 @@ router = APIRouter(tags=["statistics"])
 
 @router.get("/api/Statistics")
 def get_statistics(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Счётчики очереди модерации и объектов карты (как в старом Statistics API)."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=30)
     try:
@@ -38,7 +39,8 @@ def get_statistics(db: Session = Depends(get_db)) -> dict[str, Any]:
     history: list[dict[str, Any]] = []
     for i in range(30):
         day = (now - timedelta(days=i)).date()
-        day_start = datetime(day.year, day.month, day, tzinfo=timezone.utc)
+        # Начало суток в UTC (раньше ошибочно передавали date вместо day.day → 500 у всего endpoint).
+        day_start = datetime.combine(day, time.min, tzinfo=timezone.utc)
         day_end = day_start + timedelta(days=1)
         try:
             added = (

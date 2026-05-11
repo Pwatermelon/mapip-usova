@@ -53,9 +53,12 @@ export function StatsPage() {
         const st = await fetchJson<StatisticsDto>(`${coreBase}/api/Statistics`);
         setStats(st);
         setStatsErr(null);
-      } catch {
+      } catch (e) {
         setStats(null);
-        setStatsErr("Не удалось загрузить статистику модерации (таблицы pending / объекты).");
+        const detail = e instanceof Error ? e.message : String(e);
+        setStatsErr(
+          `Не удалось загрузить статистику модерации. ${detail}`,
+        );
       }
       try {
         const [objects, comments, popular] = await Promise.all([
@@ -136,7 +139,7 @@ export function StatsPage() {
     <section className="info-page">
       <h2>Статистика и настройки</h2>
       <section className="detail-block">
-        <h3 className="detail-subtitle">Статистика модерации (как в legacy StatisticsController)</h3>
+        <h3 className="detail-subtitle">Статистика модерации</h3>
         <p className="muted">
           Очередь на публикацию, объекты за последние 30 дней, отклонённые заявки и помесячная история по дням из базы.
         </p>
