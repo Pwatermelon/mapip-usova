@@ -110,6 +110,8 @@ export function MapPage() {
   const [filterAccessibility, setFilterAccessibility] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [mapTab, setMapTab] = useState<"objects" | "router">("objects");
+  /** Иначе эффект с objectsToGeoJson может сработать до map.on("load") и не повториться. */
+  const [mapReady, setMapReady] = useState(false);
 
   objectsRef.current = objects;
 
@@ -172,9 +174,11 @@ export function MapPage() {
         paint: { "line-color": "#22c55e", "line-width": 5, "line-opacity": 0.9 },
       });
       map.on("click", onClick);
+      setMapReady(true);
     });
 
     return () => {
+      setMapReady(false);
       map.off("click", onClick);
       map.remove();
       mapRef.current = null;
@@ -503,10 +507,11 @@ export function MapPage() {
   const displayedOnMap = list.length ? list : mode === "search" ? objects : recommendations;
 
   useEffect(() => {
+    if (!mapReady) return;
     const map = mapRef.current;
     if (!map?.getSource("objects")) return;
     (map.getSource("objects") as maplibregl.GeoJSONSource).setData(objectsToGeoJson(displayedOnMap));
-  }, [displayedOnMap]);
+  }, [displayedOnMap, mapReady]);
 
   const applyFilter = async () => {
     if (mode !== "personal" && mode !== "popular") return;

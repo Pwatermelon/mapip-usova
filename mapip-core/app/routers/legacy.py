@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
+from app.map_object_resolve import filter_ontology_objects, list_recommendation_objects
 from app.models import AdminSetting, MapObject, PendingSocialMapObject, User
 from app.ontology_service import get_graph, get_ontology_info, infrastructure_by_type, list_accessibility_elements
-from app.serializers import map_object_to_json
 
 router = APIRouter(tags=["legacy-compat"])
 
@@ -272,15 +272,15 @@ def _dist_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 @router.get("/api/recommendation/GetPopularRecommendations")
-def get_popular_recommendations(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    rows = db.query(MapObject).limit(40).all()
-    return [map_object_to_json(m) for m in rows]
+def get_popular_recommendations() -> list[dict[str, Any]]:
+    return list_recommendation_objects(40)
 
 
 @router.get("/api/recommendation/GetRecommendationsByUserId/{user_id}")
-def get_user_recommendations(user_id: int, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    rows = db.query(MapObject).order_by(MapObject.Rating.desc().nullslast()).limit(40).all()
-    return [map_object_to_json(m) for m in rows]
+def get_user_recommendations(user_id: int) -> list[dict[str, Any]]:
+    _ = user_id
+    rows = list_recommendation_objects(500)
+    return sorted(rows, key=lambda o: (o.get("display_name") or ""))[:40]
 
 
 @router.delete("/api/recommendation/RemoveRecommendation/{map_object_id}/{user_id}")
@@ -293,11 +293,11 @@ def filtering_intersected(
     user: int = Query(...),
     Categories: list[str] = Query(default=[]),
     AccessibilityElements: list[str] = Query(default=[]),
-    db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    rows = db.query(MapObject).limit(40).all()
-    out = [{"mapObject": map_object_to_json(m), "distance": 0.0} for m in rows]
-    return out
+    _ = user
+    base = list_recommendation_objects(500)
+    filtered = filter_ontology_objects(base, Categories, AccessibilityElements)
+    return [{"mapObject": o, "distance": 0.0} for o in filtered[:40]]
 
 
 @router.get("/api/recommendation/GetFilteringPopularData")
@@ -305,11 +305,11 @@ def filtering_popular(
     user: int = Query(...),
     Categories: list[str] = Query(default=[]),
     AccessibilityElements: list[str] = Query(default=[]),
-    db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    rows = db.query(MapObject).limit(40).all()
-    out = [{"mapObject": map_object_to_json(m), "distance": 0.0} for m in rows]
-    return out
+    _ = user
+    base = list_recommendation_objects(500)
+    filtered = filter_ontology_objects(base, Categories, AccessibilityElements)
+    return [{"mapObject": o, "distance": 0.0} for o in filtered[:40]]
 
 
 @router.post("/api/recommendation/SortRecommendations")

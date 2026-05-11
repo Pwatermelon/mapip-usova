@@ -8,6 +8,25 @@ from app.config import settings
 from app.routers import comments, expert, legacy, map_objects, routes_db, statistics, users
 
 
+def _migrate_db_for_ontology_object_ids(engine) -> None:
+    """Старые БД: снять FK на MapObject, чтобы id из онтологии (отрицательные) в Comment/Favorite; колонка маршрута."""
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    stmts = [
+        'ALTER TABLE "Route" ADD COLUMN IF NOT EXISTS "LinkedMapObjectId" INTEGER',
+        'ALTER TABLE "Comment" DROP CONSTRAINT IF EXISTS "Comment_MapObjectId_fkey"',
+        'ALTER TABLE "Favorite" DROP CONSTRAINT IF EXISTS "Favorite_MapObjectID_fkey"',
+    ]
+    with engine.begin() as conn:
+        for s in stmts:
+            try:
+                conn.execute(text(s))
+            except Exception:
+                pass
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     import app.models  # noqa: F401 — регистрация моделей в Base.metadata
@@ -16,6 +35,7 @@ async def lifespan(_app: FastAPI):
     from app.ontology_service import load_graph
 
     Base.metadata.create_all(bind=engine)
+    _migrate_db_for_ontology_object_ids(engine)
     db = SessionLocal()
     try:
         if db.query(AdminSetting).first() is None:

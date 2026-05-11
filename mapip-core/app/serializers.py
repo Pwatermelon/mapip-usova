@@ -1,5 +1,8 @@
 from typing import Any
 
+from sqlalchemy.orm import Session
+
+from app.map_object_resolve import resolve_map_object_dict
 from app.models import Comment, MapObject, Route
 
 
@@ -31,7 +34,8 @@ def user_public(u) -> dict[str, Any]:
     }
 
 
-def comment_to_json(c: Comment) -> dict[str, Any]:
+def comment_to_json(c: Comment, db: Session, map_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    mo = map_payload if map_payload is not None else resolve_map_object_dict(db, c.MapObjectId)
     return {
         "id": c.Id,
         "text": c.Text,
@@ -40,25 +44,38 @@ def comment_to_json(c: Comment) -> dict[str, Any]:
         "date": c.Date.isoformat() if c.Date else None,
         "mapObjectId": c.MapObjectId,
         "user": user_public(c.user) if c.user else None,
-        "mapObject": map_object_to_json(c.map_object) if c.map_object else None,
+        "mapObject": mo,
     }
 
 
-def route_with_status(r: Route) -> dict[str, Any]:
+def route_with_status(r: Route, db: Session) -> dict[str, Any]:
     objs = r.list_objects or []
+    list_objects = [
+        {
+            "id": o.Id,
+            "x": o.X,
+            "y": o.Y,
+            "displayName": o.Display_name,
+        }
+        for o in objs
+    ]
+    if not list_objects and r.LinkedMapObjectId is not None:
+        d = resolve_map_object_dict(db, r.LinkedMapObjectId)
+        if d:
+            list_objects = [
+                {
+                    "id": d["id"],
+                    "x": d["x"],
+                    "y": d["y"],
+                    "displayName": d.get("display_name"),
+                }
+            ]
+    count = len(list_objects)
     return {
         "id": r.Id,
         "date": r.Date,
         "userId": r.UserId,
-        "hasAccessibilityData": len(objs) > 0,
-        "objectsCount": len(objs),
-        "listObjects": [
-            {
-                "id": o.Id,
-                "x": o.X,
-                "y": o.Y,
-                "displayName": o.Display_name,
-            }
-            for o in objs
-        ],
+        "hasAccessibilityData": count > 0,
+        "objectsCount": count,
+        "listObjects": list_objects,
     }

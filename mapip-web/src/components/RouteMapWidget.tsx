@@ -297,6 +297,8 @@ export function RouteMapWidget() {
   const [myPoint, setMyPoint] = useState<[number, number] | null>(null);
   const [useMyLocationRouting, setUseMyLocationRouting] = useState(false);
   const [mapPickMode, setMapPickMode] = useState<"from" | "to" | null>(null);
+  /** Без этого эффект с setData может отработать до map.on("load") и больше не повториться. */
+  const [mapReady, setMapReady] = useState(false);
 
   mapPickModeRef.current = mapPickMode;
 
@@ -449,8 +451,10 @@ export function RouteMapWidget() {
           setMapPickMode(null);
         }
       });
+      setMapReady(true);
     });
     return () => {
+      setMapReady(false);
       fromMarkerRef.current?.remove();
       toMarkerRef.current?.remove();
       meMarkerRef.current?.remove();
@@ -461,6 +465,7 @@ export function RouteMapWidget() {
   }, []);
 
   useEffect(() => {
+    if (!mapReady) return;
     const map = mapRef.current;
     if (!map?.getSource("core-objects")) return;
     const features: GeoJSON.Feature[] = objects.map((obj) => ({
@@ -472,7 +477,7 @@ export function RouteMapWidget() {
       type: "FeatureCollection",
       features,
     });
-  }, [objects]);
+  }, [objects, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -5,8 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Comment, Favorite, MapObject, User
-from app.serializers import map_object_to_json, user_public
+from app.map_object_resolve import map_object_exists, resolve_map_object_dict
+from app.models import Comment, Favorite, User
+from app.serializers import user_public
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -69,15 +70,17 @@ def register(body: RegisterBody, db: Session = Depends(get_db)) -> dict[str, str
 
 @router.get("/GetLikesByUserId/{user_id}")
 def likes(user_id: int, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    q = (
-        db.query(MapObject)
-        .join(Favorite, Favorite.MapObjectID == MapObject.Id)
-        .filter(Favorite.UserID == user_id)
-        .all()
-    )
-    if not q:
+    favs = db.query(Favorite).filter(Favorite.UserID == user_id).all()
+    if not favs:
         raise HTTPException(status_code=404)
-    return [map_object_to_json(m) for m in q]
+    out: list[dict[str, Any]] = []
+    for f in favs:
+        d = resolve_map_object_dict(db, f.MapObjectID)
+        if d:
+            out.append(d)
+    if not out:
+        raise HTTPException(status_code=404)
+    return out
 
 
 @router.post("/AddFavorite")
@@ -88,7 +91,7 @@ def add_favorite(
 ) -> str:
     if not db.query(User).filter(User.Id == userID).first():
         raise HTTPException(status_code=400, detail="Некорректный ID пользователя или объекта карты.")
-    if not db.query(MapObject).filter(MapObject.Id == mapObjectID).first():
+    if not map_object_exists(db, mapObjectID):
         raise HTTPException(status_code=400, detail="Некорректный ID пользователя или объекта карты.")
     if db.query(Favorite).filter(Favorite.UserID == userID, Favorite.MapObjectID == mapObjectID).first():
         return "Уже в избранном."

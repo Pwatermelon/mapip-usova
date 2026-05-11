@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
+from app.map_object_resolve import map_object_exists
 from app.models import Comment, MapObject, User
 from app.serializers import comment_to_json
 
@@ -48,7 +49,7 @@ class AddCommentFlexible(BaseModel):
 
 @router.get("/GetCommentsByMapObject/{map_object_id}")
 def get_comments(map_object_id: str, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    q = db.query(Comment).options(joinedload(Comment.user), joinedload(Comment.map_object))
+    q = db.query(Comment).options(joinedload(Comment.user))
     if map_object_id.isdigit():
         q = q.filter(Comment.MapObjectId == int(map_object_id))
     else:
@@ -57,7 +58,7 @@ def get_comments(map_object_id: str, db: Session = Depends(get_db)) -> list[dict
             (MapObject.Display_name.ilike(like)) | (MapObject.Adress.ilike(like))
         )
     rows = q.all()
-    return [comment_to_json(c) for c in rows]
+    return [comment_to_json(c, db) for c in rows]
 
 
 @router.get("/GetCommentsByMapObject")
@@ -68,25 +69,25 @@ def get_comment_by_object_and_user(
 ) -> dict[str, Any]:
     row = (
         db.query(Comment)
-        .options(joinedload(Comment.user), joinedload(Comment.map_object))
+        .options(joinedload(Comment.user))
         .filter(Comment.MapObjectId == mapObjectId, Comment.UserId == userId)
         .first()
     )
     if not row:
         raise HTTPException(status_code=404, detail="Комментарий не найден")
-    return comment_to_json(row)
+    return comment_to_json(row, db)
 
 
 @router.get("/GetLastComments")
 def get_last_comments(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     rows = (
         db.query(Comment)
-        .options(joinedload(Comment.user), joinedload(Comment.map_object))
+        .options(joinedload(Comment.user))
         .order_by(Comment.Date.desc())
         .limit(80)
         .all()
     )
-    return [comment_to_json(c) for c in rows]
+    return [comment_to_json(c, db) for c in rows]
 
 
 @router.get("/GetOffensiveComments")
@@ -95,11 +96,11 @@ def get_offensive_comments(db: Session = Depends(get_db)) -> list[dict[str, Any]
     bad_markers = ("хуй", "бля", "пизд", "еб", "сук")
     rows = (
         db.query(Comment)
-        .options(joinedload(Comment.user), joinedload(Comment.map_object))
+        .options(joinedload(Comment.user))
         .all()
     )
     out = [c for c in rows if any(m in (c.Text or "").lower() for m in bad_markers)]
-    return [comment_to_json(c) for c in out]
+    return [comment_to_json(c, db) for c in out]
 
 
 @router.post("/AddComment")
@@ -112,7 +113,7 @@ def add_comment(body: dict[str, Any], db: Session = Depends(get_db)) -> dict[str
 
     if not db.query(User).filter(User.Id == uid).first():
         raise HTTPException(status_code=400, detail="Пользователь не найден.")
-    if not db.query(MapObject).filter(MapObject.Id == mid).first():
+    if not map_object_exists(db, mid):
         raise HTTPException(status_code=400, detail="Объект карты не найден.")
 
     c = Comment(

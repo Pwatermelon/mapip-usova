@@ -49,10 +49,10 @@ class Comment(Base):
     Rate = Column("Rate", Integer, nullable=False, quote=True)
     UserId = Column("UserId", Integer, ForeignKey("User.Id"), nullable=False, quote=True)
     Date = Column("Date", DateTime, nullable=False, quote=True)
-    MapObjectId = Column("MapObjectId", Integer, ForeignKey("MapObject.Id"), nullable=False, quote=True)
+    # Без FK на MapObject: id объекта может быть из онтологии (отрицательный синтетический id).
+    MapObjectId = Column("MapObjectId", Integer, nullable=False, quote=True)
 
     user = relationship("User", foreign_keys=[UserId])
-    map_object = relationship("MapObject", foreign_keys=[MapObjectId])
 
 
 class Route(Base):
@@ -61,6 +61,8 @@ class Route(Base):
     Id = Column("Id", Integer, primary_key=True, autoincrement=True, quote=True)
     Date = Column("Date", String, nullable=False, quote=True)
     UserId = Column("UserId", Integer, nullable=False, quote=True)
+    # Объект только из онтологии (нет строки в MapObject для M2M): сохраняем id здесь.
+    LinkedMapObjectId = Column("LinkedMapObjectId", Integer, nullable=True, quote=True)
 
     list_objects = relationship(
         "MapObject",
@@ -73,9 +75,7 @@ class Favorite(Base):
     __tablename__ = "Favorite"
 
     UserID = Column("UserID", Integer, ForeignKey("User.Id"), primary_key=True, quote=True)
-    MapObjectID = Column("MapObjectID", Integer, ForeignKey("MapObject.Id"), primary_key=True, quote=True)
-
-    map_object = relationship("MapObject", foreign_keys=[MapObjectID])
+    MapObjectID = Column("MapObjectID", Integer, primary_key=True, quote=True)
 
 
 class AdminSetting(Base):
