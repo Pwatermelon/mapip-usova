@@ -556,41 +556,52 @@ export function MapPage() {
 
   return (
     <>
-    <section className="embedded-router-section">
-      <div className="field-row" style={{ marginBottom: 10 }}>
-        <button type="button" className="btn btn-ghost" onClick={() => setMapTab("objects")}>
+    <section className="embedded-router-section map-page-toolbar">
+      <div className="map-tab-bar" role="tablist" aria-label="Режим карты">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mapTab === "objects"}
+          className={`map-tab ${mapTab === "objects" ? "active" : ""}`}
+          onClick={() => setMapTab("objects")}
+        >
           Карта доступности
         </button>
-        <button type="button" className="btn btn-ghost" onClick={() => setMapTab("router")}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mapTab === "router"}
+          className={`map-tab ${mapTab === "router" ? "active" : ""}`}
+          onClick={() => setMapTab("router")}
+        >
           Маршрутизатор
         </button>
       </div>
     </section>
     {mapTab === "objects" ? (
-    <div className="map-layout">
-      <aside className="side-panel">
+    <div className="map-layout map-page-layout">
+      <aside className="side-panel side-panel-objects">
         <h2>{mode === "search" ? "Объекты и поиск" : "Режим просмотра"}</h2>
-        {!user && <p className="hint-banner muted">Вход — в правом верхнем углу.</p>}
-        <div className="field-row" style={{ marginBottom: 10 }}>
-          <button type="button" className="btn btn-ghost" onClick={() => activateMode("search")}>
+        <div className="map-mode-bar">
+          <button type="button" className={`map-mode-btn ${mode === "search" ? "active" : ""}`} onClick={() => activateMode("search")}>
             Поиск
           </button>
-          <button type="button" className="btn btn-ghost" onClick={() => void loadPersonal()}>
+          <button type="button" className={`map-mode-btn ${mode === "personal" ? "active" : ""}`} onClick={() => void loadPersonal()}>
             Вам стоит посетить
           </button>
-          <button type="button" className="btn btn-ghost" onClick={() => void loadPopular()}>
+          <button type="button" className={`map-mode-btn ${mode === "popular" ? "active" : ""}`} onClick={() => void loadPopular()}>
             По мнению общества
           </button>
-          <button type="button" className="btn btn-ghost" onClick={() => void loadLikes()}>
+          <button type="button" className={`map-mode-btn ${mode === "likes" ? "active" : ""}`} onClick={() => void loadLikes()}>
             Избранное
           </button>
         </div>
         {(mode === "personal" || mode === "popular") && (
-          <div className="field-row" style={{ marginBottom: 10 }}>
-            <button type="button" className="btn btn-ghost" onClick={() => setShowFilter((v) => !v)}>
+          <div className="map-mode-bar map-mode-bar--sub">
+            <button type="button" className="map-mode-btn" onClick={() => setShowFilter((v) => !v)}>
               Отфильтровать
             </button>
-            <button type="button" className="btn btn-ghost" onClick={() => void sortByDistance()}>
+            <button type="button" className="map-mode-btn" onClick={() => void sortByDistance()}>
               Отсортировать
             </button>
           </div>
@@ -624,13 +635,13 @@ export function MapPage() {
                 {a}
               </label>
             ))}
-            <div className="field-row" style={{ marginTop: 8 }}>
-              <button type="button" className="btn btn-sm" onClick={() => void applyFilter()}>
+            <div className="map-mode-bar map-mode-bar--sub" style={{ marginTop: 8 }}>
+              <button type="button" className="map-mode-btn map-mode-btn--primary" onClick={() => void applyFilter()}>
                 Применить
               </button>
               <button
                 type="button"
-                className="btn btn-sm btn-ghost"
+                className="map-mode-btn"
                 onClick={() => {
                   setFilterDisability([]);
                   setFilterAccessibility([]);
@@ -644,16 +655,16 @@ export function MapPage() {
         {mode === "search" && (
           <div className="field">
             <label>Поиск</label>
-            <div className="field-row">
+            <div className="field-row map-search-row">
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Название или адрес" />
-              <button type="button" className="btn btn-ghost" onClick={() => void runSearch()}>
+              <button type="button" className="map-mode-btn map-mode-btn--primary" onClick={() => void runSearch()}>
                 Найти
               </button>
             </div>
           </div>
         )}
         {err && <p className="err">{err}</p>}
-        <div className="search-results">
+        <div className="search-results objects-hit-list">
           {listRows.map((row) => {
             const o = row.mapObject;
             return (
@@ -669,10 +680,10 @@ export function MapPage() {
               <p>{o.adress}</p>
               {typeof row.distance === "number" && <p className="muted">От Вас: {row.distance.toFixed(2)} км</p>}
               {mode === "search" && (
-                <div className="field-row" style={{ marginTop: 6 }}>
+                <div className="map-mode-bar map-mode-bar--sub" style={{ marginTop: 8 }}>
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm"
+                    className="map-mode-btn map-mode-btn--sm"
                     onClick={async (e) => {
                       e.stopPropagation();
                       await buildRouteToObject(o);
@@ -683,11 +694,11 @@ export function MapPage() {
                 </div>
               )}
               {mode !== "search" && (
-                <div className="field-row" style={{ marginTop: 6 }}>
+                <div className="map-mode-bar map-mode-bar--sub" style={{ marginTop: 8 }}>
                   {mode === "likes" && user && (
                     <button
                       type="button"
-                      className="btn btn-ghost btn-sm"
+                      className="map-mode-btn map-mode-btn--sm"
                       onClick={async (e) => {
                         e.stopPropagation();
                         try {
@@ -708,7 +719,7 @@ export function MapPage() {
                   {mode === "personal" && user && (
                     <button
                       type="button"
-                      className="btn btn-ghost btn-sm"
+                      className="map-mode-btn map-mode-btn--sm"
                       onClick={async (e) => {
                         e.stopPropagation();
                         try {
@@ -734,9 +745,9 @@ export function MapPage() {
         </div>
         {selected && (
           <div className="detail-block">
-            <div className="field-row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+            <div className="field-row detail-head-row">
               <h2 style={{ margin: 0 }}>Выбрано</h2>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected(null)}>
+              <button type="button" className="map-mode-btn map-mode-btn--sm" onClick={() => setSelected(null)}>
                 Закрыть
               </button>
             </div>
@@ -745,14 +756,14 @@ export function MapPage() {
             </p>
             <p className="muted">{selected.type}</p>
             <p className="muted">{selected.adress}</p>
-            <div className="field-row" style={{ marginBottom: 8 }}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void buildRouteToObject(selected)}>
+            <div className="map-mode-bar map-mode-bar--sub">
+              <button type="button" className="map-mode-btn map-mode-btn--sm" onClick={() => void buildRouteToObject(selected)}>
                 Маршрут до точки
               </button>
             </div>
             {user && (
-              <div className="field-row" style={{ marginBottom: 8 }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void toggleFavorite()}>
+              <div className="map-mode-bar map-mode-bar--sub">
+                <button type="button" className="map-mode-btn map-mode-btn--sm" onClick={() => void toggleFavorite()}>
                   {favorite ? "Удалить из избранного" : "Добавить в избранное"}
                 </button>
               </div>
@@ -774,8 +785,8 @@ export function MapPage() {
             ) : (
               <p className="muted">Нет данных онтологии или endpoint недоступен.</p>
             )}
-            <div className="field-row" style={{ marginBottom: 8 }}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowComments((v) => !v)}>
+            <div className="map-mode-bar map-mode-bar--sub">
+              <button type="button" className="map-mode-btn map-mode-btn--sm" onClick={() => setShowComments((v) => !v)}>
                 {showComments ? "Скрыть комментарии" : "Показать комментарии"}
               </button>
             </div>
@@ -806,7 +817,7 @@ export function MapPage() {
                 onChange={(e) => setCommentRate(Number(e.target.value))}
               />
             </div>
-            <button type="button" className="btn" onClick={() => void sendComment()}>
+            <button type="button" className="map-mode-btn map-mode-btn--primary" onClick={() => void sendComment()}>
               {editingCommentId ? "Обновить" : "Отправить"}
             </button>
           </div>
@@ -831,7 +842,7 @@ export function MapPage() {
       </div>
     </div>
     ) : (
-      <section className="embedded-router-section">
+      <section className="embedded-router-section map-router-tab-panel">
         <RouteMapWidget />
       </section>
     )}

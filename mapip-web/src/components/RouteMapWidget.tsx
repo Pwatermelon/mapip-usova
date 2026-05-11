@@ -428,11 +428,12 @@ export function RouteMapWidget() {
         type: "circle",
         source: "core-objects",
         paint: {
-          "circle-radius": 5,
-          "circle-color": "#2563eb",
-          "circle-stroke-width": 1.2,
-          "circle-stroke-color": "#1e3a8a",
-          "circle-opacity": 0.85,
+          /* Как на карте доступности (MapPage objects-circles) */
+          "circle-radius": 9,
+          "circle-color": "#3b82f6",
+          "circle-opacity": 0.55,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#93c5fd",
         },
       });
       map.addSource("overpass-pois", {
@@ -1006,7 +1007,7 @@ export function RouteMapWidget() {
           )}
           <button
             type="button"
-            className={`btn btn-sm ${mapPickMode === "from" ? "btn-nav-active" : ""}`}
+            className={`btn btn-sm btn-map-pick ${mapPickMode === "from" ? "btn-nav-active" : ""}`}
             disabled={useMyLocationRouting}
             onClick={() => setMapPickMode((m) => (m === "from" ? null : "from"))}
           >
@@ -1047,7 +1048,7 @@ export function RouteMapWidget() {
           )}
           <button
             type="button"
-            className={`btn btn-sm ${mapPickMode === "to" ? "btn-nav-active" : ""}`}
+            className={`btn btn-sm btn-map-pick ${mapPickMode === "to" ? "btn-nav-active" : ""}`}
             onClick={() => setMapPickMode((m) => (m === "to" ? null : "to"))}
           >
             {mapPickMode === "to" ? "Кликните по карте для финиша…" : "Указать «Куда» на карте"}
@@ -1102,7 +1103,7 @@ export function RouteMapWidget() {
             <option value={3}>3</option>
           </select>
         </div>
-        <button type="button" className="btn" onClick={() => void build()}>
+        <button type="button" className="btn btn-build-route" onClick={() => void build()}>
           Построить маршрут
         </button>
         {err && (

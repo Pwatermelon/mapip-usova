@@ -688,11 +688,13 @@ body {
 
 .main {
   padding: 10px 0;
+  /* Одна высота для карты доступности и маршрутизатора на главной странице */
+  --map-work-height: max(420px, calc(100vh - 210px));
 }
 
 .map-layout {
   width: 92%;
-  height: calc(100vh - 210px);
+  height: var(--map-work-height);
   margin: 0 auto;
   grid-template-columns: 40% 1fr;
   background: transparent;
@@ -890,9 +892,158 @@ button.btn-ghost {
   margin: 0 0 8px;
 }
 
-.embedded-router-section .map-layout {
-  height: min(calc(100vh - 240px), 920px);
-  max-height: calc(100vh - 200px);
+/* Высоту задаёт общий .map-layout + --map-work-height (без отдельного укороченного блока). */
+.map-page-toolbar.embedded-router-section {
+  margin-bottom: 0;
+}
+
+.map-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  border: 2px solid #b8dafd;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  margin-bottom: 10px;
+}
+
+.map-tab {
+  flex: 1;
+  min-width: 160px;
+  padding: 11px 16px;
+  border: none;
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.map-tab:hover {
+  background: #e2e8f0;
+}
+
+.map-tab.active {
+  background: linear-gradient(180deg, #1e90ff, #1874d8);
+  color: #fff;
+}
+
+.map-mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.map-mode-bar--sub {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.map-mode-btn {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid #bfdbfe;
+  background: #f8fafc;
+  color: #1e3a5a;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.map-mode-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.map-mode-btn.active {
+  background: #dbeafe;
+  border-color: #1e90ff;
+  color: #0c4a6e;
+  box-shadow: inset 0 0 0 1px #1e90ff;
+}
+
+.map-mode-btn--primary {
+  background: #17b52e;
+  border-color: #15803d;
+  color: #fff;
+}
+
+.map-mode-btn--primary:hover {
+  background: #16a34a;
+  border-color: #166534;
+  color: #fff;
+}
+
+.map-mode-btn--sm {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+.map-search-row .map-mode-btn--primary {
+  flex-shrink: 0;
+  align-self: stretch;
+  min-height: 40px;
+}
+
+.side-panel-objects {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.side-panel-objects .objects-hit-list.search-results {
+  flex: 1 1 auto;
+  min-height: 200px;
+  max-height: min(62vh, 720px);
+  margin-top: 0.35rem;
+}
+
+.side-panel-objects .search-hit h3 {
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.side-panel-objects .search-hit p {
+  font-size: 0.86rem;
+}
+
+.detail-head-row {
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.btn-map-pick {
+  background: #eff6ff !important;
+  color: #1e3a8a !important;
+  border: 1px solid #93c5fd !important;
+}
+
+.btn-map-pick:hover:not(:disabled) {
+  background: #dbeafe !important;
+}
+
+.btn-map-pick.btn-nav-active {
+  box-shadow: 0 0 0 2px #f59e0b !important;
+  background: #fffbeb !important;
+  border-color: #f59e0b !important;
+}
+
+.btn-build-route {
+  background: #17b52e !important;
+  color: #fff !important;
+  width: 100%;
+  margin-top: 4px;
+  padding: 0.65rem 1rem !important;
+}
+
+.btn-build-route:hover:not(:disabled) {
+  background: #16a34a !important;
 }
 
 .info-page h2 {
