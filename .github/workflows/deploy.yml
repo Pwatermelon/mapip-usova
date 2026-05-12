@@ -4,6 +4,10 @@ name: Deploy (build on host)
 on:
   push:
     branches: [main, master]
+    # Не деплоить стек на VPS, если в коммите только мобильные клиенты.
+    paths-ignore:
+      - "mapip-ios/**"
+      - "mapip-android/**"
   workflow_dispatch:
 
 jobs:

@@ -1,3 +1,9 @@
 # Xcode / iOS
 **/xcuserdata/
 **/*.xcuserstate
+
+# Android / Gradle (ключи и путь к SDK только локально)
+mapip-android/local.properties
+mapip-android/.gradle/
+mapip-android/**/build/
+
