@@ -1,24 +1,43 @@
 # mapip-ios
 
-Клиент MAPIP на SwiftUI. В текущей версии приложение содержит нативный маршрутизатор на Apple Maps, но работает через те же backend API (`routing` + `core`) и поддерживает подсказки адресов.
+Нативный клиент **MAPIP** на SwiftUI. Код лежит **в том же Git-репозитории**, что `mapip-core`, `mapip-web` и `mapip-routing-service` (см. `../README.md` в каталоге `MAPIP/`). Отдельный репозиторий для iOS не предполагается.
 
-## Подключение в Xcode
+## Возможности
 
-1. **File → New → Project → App**, интерфейс SwiftUI, **минимальная версия iOS 17** (MapKit SwiftUI с полилинией).
-2. В сгенерированном `App.swift` оставьте `@main` и укажите `WindowGroup { ContentView() }` (или переименуйте в `MapipApp` по желанию).
-3. Используйте папку target `mapip/mapip/`:
-   - `ContentView.swift` (точка входа экрана),
-   - `RouterScreen.swift`,
-   - `MapipConfig.swift`,
-   - `Services/MapipAPI.swift`.
-   В проекте должен быть только один `@main` в `mapipApp.swift`.
-4. В **Info** добавьте разрешение на сеть к вашему серверу: для отладки по HTTP в **Info.plist** можно временно добавить `App Transport Security` → `Exception Domains` → ваш хост с `NSExceptionAllowsInsecureHTTPLoads = YES` (только для dev).
-5. В `MapipConfig.swift` по умолчанию стоит локальный адрес. В приложении есть кнопка `Сервер` для смены URL стенда.
+- **Маршрутизатор** на Apple Maps: геокодинг, построение маршрута, подсказки, слой объектов с `GET …/GetSocialMapObject` (то же объединение БД и данных из онтологии, что отдаёт backend).
+- **Вход и регистрация** (`MapAuthModel`, `LoginSheet`): cookie-сессия как у веба — `POST /api/users/login`, `POST /api/users/AddUser`, затем повторный вход; `GET /api/users/current-user`.
+- **Добавление места на карту** (`AddObjectView`): после входа — `POST …/client/AddMapObject` с `userId` (заявка уходит на модерацию на стороне core). Списки для формы подтягиваются с backend:
+  - `GET /api/admin/get/infrastructure` — категории социальной инфраструктуры из онтологии/админки;
+  - `GET /api/SocialMapObject/get/accessibility` — варианты доступной среды.
+- **Overpass** (маршрутизатор): `GET …/routing/v1/overpass/objects` — точки вдоль маршрута из внешнего Overpass API (это не замена онтологии объектов карты; основная карта — `GetSocialMapObject`).
 
-## API
+## Открытие в Xcode
 
-- Объекты карты: `GET {baseURL}/GetSocialMapObject`
-- Подсказки: `GET {baseURL}/routing/v1/geocode/search?q=...`
-- Маршруты: `POST {baseURL}/routing/v1/directions/geojson`
+1. Откройте `mapip/mapip.xcodeproj`.
+2. Минимальная версия **iOS 17** (MapKit SwiftUI, полилинии).
+3. В target должен быть один `@main` в `mapipApp.swift`.
+4. Для HTTP в dev в **Info** при необходимости добавьте исключение ATS для вашего хоста.
+5. Базовый URL сервера задаётся в `MapipConfig.swift` и кнопкой **Сервер** в приложении.
 
-Сессия входа (`/api/users/login`) при необходимости — с сохранением cookie (`URLSessionConfiguration` с `httpCookieStorage`).
+## Файлы target (основные)
+
+- `ContentView.swift` → `RouterScreen`
+- `RouterScreen.swift` — карта, маршрут, объекты, вход/добавить
+- `LoginSheet.swift` — вход | регистрация
+- `AddObjectView.swift` — форма нового объекта
+- `Services/MapipAPI.swift` — HTTP к core + routing
+- `Services/MapAuthModel.swift` — состояние пользователя
+
+## API (кратко)
+
+| Действие | Метод |
+|----------|--------|
+| Объекты карты | `GET {base}/GetSocialMapObject` |
+| Вход | `POST {base}/api/users/login` |
+| Регистрация | `POST {base}/api/users/AddUser` |
+| Текущий пользователь | `GET {base}/api/users/current-user` |
+| Новый объект | `POST {base}/client/AddMapObject` (multipart) |
+| Инфраструктура (онтология) | `GET {base}/api/admin/get/infrastructure` |
+| Доступность | `GET {base}/api/SocialMapObject/get/accessibility` |
+| Геокодинг | `GET {base}/routing/v1/geocode/search?q=…` |
+| Маршрут | `POST {base}/routing/v1/directions/geojson` |
