@@ -31,6 +31,7 @@ def user_public(u) -> dict[str, Any]:
         "type": u.Type,
         "email": u.Email,
         "score": u.Score,
+        "isAdmin": bool(getattr(u, "IsAdmin", False)),
     }
 
 

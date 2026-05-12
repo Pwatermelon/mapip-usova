@@ -39,6 +39,8 @@ class User(Base):
     Email = Column("Email", String, nullable=False, quote=True)
     Password = Column("Password", String, nullable=False, quote=True)
     Score = Column("Score", Integer, nullable=False, default=0, quote=True)
+    # Права администратора/эксперта; не выставляется через публичную регистрацию (только сид или БД).
+    IsAdmin = Column("IsAdmin", Boolean, nullable=False, default=False, quote=True)
 
 
 class Comment(Base):

@@ -14,8 +14,10 @@ export type AuthUser = {
   name?: string;
   email?: string;
   score?: number;
-  /** 1 — администратор / эксперт (панель эксперта, статистика). Остальные — обычные пользователи. */
+  /** Категория доступности (legacy User.Type, 0–4), не путать с правами админа. */
   type?: number;
+  /** Панель эксперта и статистика; выставляется только на бэкенде (сид / БД), не через регистрацию. */
+  isAdmin?: boolean;
 };
 
 type AuthContextValue = {
@@ -23,6 +25,7 @@ type AuthContextValue = {
   loading: boolean;
   refresh: () => Promise<void>;
   login: (email: string, password: string) => Promise<string | null>;
+  register: (name: string, type: number, email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
 };
 
@@ -66,14 +69,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [refresh],
   );
 
+  const register = useCallback(
+    async (name: string, type: number, email: string, password: string) => {
+      const res = await fetch(`${coreBase}/api/users/AddUser`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          name: name.trim(),
+          type,
+          email: email.trim(),
+          password,
+        }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { detail?: { message?: string } | string };
+        const d = j.detail;
+        return typeof d === "object" && d && "message" in d ? String(d.message) : "Ошибка регистрации";
+      }
+      return login(email, password);
+    },
+    [login],
+  );
+
   const logout = useCallback(async () => {
     await fetch(`${coreBase}/api/users/logout`, { credentials: "include" });
     setUser(null);
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, refresh, login, logout }),
-    [user, loading, refresh, login, logout],
+    () => ({ user, loading, refresh, login, register, logout }),
+    [user, loading, refresh, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

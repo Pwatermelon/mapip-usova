@@ -8,6 +8,42 @@ from app.config import settings
 from app.routers import comments, expert, legacy, map_objects, routes_db, statistics, users
 
 
+def _migrate_user_is_admin(engine) -> None:
+    """Колонка IsAdmin: права админа отдельно от legacy User.Type (категория 0–4)."""
+    from sqlalchemy import inspect, text
+
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("User"):
+            return
+        col_names = {c["name"] for c in insp.get_columns("User")}
+    except Exception:
+        return
+    if "IsAdmin" not in col_names:
+        with engine.begin() as conn:
+            if engine.dialect.name == "postgresql":
+                conn.execute(text('ALTER TABLE "User" ADD COLUMN "IsAdmin" BOOLEAN NOT NULL DEFAULT FALSE'))
+            else:
+                conn.execute(text('ALTER TABLE "User" ADD COLUMN "IsAdmin" INTEGER NOT NULL DEFAULT 0'))
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                'CREATE TABLE IF NOT EXISTS "_mapip_meta" ('
+                '"key" VARCHAR(128) PRIMARY KEY, "value" VARCHAR(256))'
+            )
+        )
+        row = conn.execute(text('SELECT 1 FROM "_mapip_meta" WHERE "key" = \'user_is_admin_v1\'')).fetchone()
+        if row is None:
+            if engine.dialect.name == "postgresql":
+                conn.execute(text('UPDATE "User" SET "IsAdmin" = TRUE WHERE "Type" = 1'))
+            else:
+                conn.execute(text('UPDATE "User" SET "IsAdmin" = 1 WHERE "Type" = 1'))
+            conn.execute(
+                text('INSERT INTO "_mapip_meta" ("key", "value") VALUES (\'user_is_admin_v1\', \'done\')')
+            )
+
+
 def _migrate_db_for_ontology_object_ids(engine) -> None:
     """Старые БД: снять FK на MapObject, чтобы id из онтологии (отрицательные) в Comment/Favorite; колонка маршрута."""
     if engine.dialect.name != "postgresql":
@@ -37,6 +73,7 @@ async def lifespan(_app: FastAPI):
 
     Base.metadata.create_all(bind=engine)
     _migrate_db_for_ontology_object_ids(engine)
+    _migrate_user_is_admin(engine)
     db = SessionLocal()
     try:
         if db.query(AdminSetting).first() is None:
@@ -59,6 +96,7 @@ async def lifespan(_app: FastAPI):
                         Email=email,
                         Password=settings.dev_admin_password,
                         Score=0,
+                        IsAdmin=True,
                     )
                 )
                 db.commit()

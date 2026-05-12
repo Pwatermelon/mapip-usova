@@ -11,7 +11,7 @@ import { ExpertPanelPage } from "./pages/ExpertPanelPage";
 import { MapPage } from "./pages/MapPage";
 import { StatsPage } from "./pages/StatsPage";
 
-/** Только пользователи с type === 1 (администратор в legacy User.Type). */
+/** Только пользователи с isAdmin (флаг на бэкенде; не через публичную регистрацию). */
 function RequireAdmin({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) {
@@ -23,7 +23,7 @@ function RequireAdmin({ children }: { children: ReactNode }) {
       </main>
     );
   }
-  if (!user || user.type !== 1) {
+  if (!user || user.isAdmin !== true) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -36,7 +36,10 @@ type HeaderAuthProps = {
 
 function HeaderAuth({ impairedMode, onToggleImpaired }: HeaderAuthProps) {
   const { user, loading, logout } = useAuth();
-  const [loginOpen, setLoginOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState<{ open: boolean; tab: "login" | "register" }>({
+    open: false,
+    tab: "login",
+  });
 
   return (
     <>
@@ -53,22 +56,35 @@ function HeaderAuth({ impairedMode, onToggleImpaired }: HeaderAuthProps) {
             </button>
           </>
         ) : (
-          <button type="button" className="btn btn-sm btn-green" onClick={() => setLoginOpen(true)}>
-            Войти
-          </button>
+          <>
+            <button type="button" className="btn btn-sm btn-green" onClick={() => setAuthOpen({ open: true, tab: "login" })}>
+              Войти
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-register-header"
+              onClick={() => setAuthOpen({ open: true, tab: "register" })}
+            >
+              Регистрация
+            </button>
+          </>
         )}
         <button type="button" className="btn btn-sm btn-blue-legacy" onClick={onToggleImpaired}>
           {impairedMode ? "Обычная версия" : "Версия для слабовидящих"}
         </button>
       </div>
-      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      <LoginModal
+        open={authOpen.open}
+        initialTab={authOpen.tab}
+        onClose={() => setAuthOpen((s) => ({ ...s, open: false }))}
+      />
     </>
   );
 }
 
 function AppShell() {
   const { user } = useAuth();
-  const isAdmin = user?.type === 1;
+  const isAdmin = user?.isAdmin === true;
   const [impairedMode, setImpairedMode] = useState<boolean>(() => localStorage.getItem("mapip-contrast") === "1");
   const [fontScale, setFontScale] = useState<number>(() => Number(localStorage.getItem("mapip-bvi-font") ?? "1.1"));
   const [lineHeight, setLineHeight] = useState<number>(() => Number(localStorage.getItem("mapip-bvi-line") ?? "1.6"));

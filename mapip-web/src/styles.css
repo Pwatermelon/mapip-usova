@@ -463,6 +463,37 @@ button.btn-ghost {
   box-shadow: 0 24px 48px -12px rgba(30, 58, 138, 0.22);
 }
 
+.login-auth-tabs {
+  display: flex;
+  gap: 0;
+  margin: -0.25rem -0.25rem 1rem;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+}
+
+.login-auth-tab {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.login-auth-tab:hover {
+  background: #e2e8f0;
+}
+
+.login-auth-tab.active {
+  background: linear-gradient(180deg, #1e90ff, #1874d8);
+  color: #fff;
+}
+
 .login-modal .login-modal-card h2 {
   margin: 0 0 0.4rem;
   font-size: 1.28rem;
@@ -621,6 +652,16 @@ body {
 .header-user {
   max-width: 180px;
   color: #111827;
+}
+
+.header-auth .btn-register-header {
+  background: #fff !important;
+  color: #1565c0 !important;
+  border: 2px solid #1e90ff !important;
+}
+
+.header-auth .btn-register-header:hover:not(:disabled) {
+  background: #e8f4ff !important;
 }
 
 .nav {

@@ -62,6 +62,7 @@ def register(body: RegisterBody, db: Session = Depends(get_db)) -> dict[str, str
         Email=body.email.strip(),
         Password=body.password,
         Score=0,
+        IsAdmin=False,
     )
     db.add(u)
     db.commit()
@@ -128,6 +129,7 @@ def get_user_by_email(email: str, db: Session = Depends(get_db)) -> dict[str, An
         "name": u.Name,
         "email": u.Email,
         "type": u.Type,
+        "isAdmin": bool(getattr(u, "IsAdmin", False)),
         "password": u.Password,
         "score": u.Score,
     }
