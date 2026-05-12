@@ -11,12 +11,25 @@ final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDeleg
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
+        // Для маршрутизатора не нужен best: реже обновления → меньше перерисовок SwiftUI.
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = 12
     }
 
     func start() {
         manager.requestWhenInUseAuthorization()
         manager.startUpdatingLocation()
+    }
+
+    /// В режиме навигации — чаще и точнее; в обычном — экономим батарею и главный поток.
+    func setHighAccuracyNavigationMode(_ on: Bool) {
+        if on {
+            manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+            manager.distanceFilter = 5
+        } else {
+            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            manager.distanceFilter = 12
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {

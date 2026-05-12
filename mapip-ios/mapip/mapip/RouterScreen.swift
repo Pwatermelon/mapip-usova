@@ -19,19 +19,22 @@ struct RouterScreen: View {
     @StateObject private var auth = MapAuthModel()
     @State private var showLogin = false
     @State private var showAddObject = false
+    @State private var showSettingsSheet = false
     @State private var fromText = ""
     @State private var toText = ""
     @State private var profile = "wheelchair"
     @State private var alternatives = 3
     @State private var message: String?
     @State private var error: String?
-    @State private var showServerSettings = false
     @State private var lines: [RouteLine] = []
     @State private var objects: [MapObjectDTO] = []
     @State private var fromSuggestions: [GeocodeHit] = []
     @State private var toSuggestions: [GeocodeHit] = []
     @State private var fromSuggestVersion = 0
     @State private var toSuggestVersion = 0
+    /// Не запускать подсказки после выбора точки на карте / из списка / объекта (иначе `onChange` снова дергает геокод).
+    @State private var suppressFromSuggestionsOnNextTextChange = false
+    @State private var suppressToSuggestionsOnNextTextChange = false
     @State private var position: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 51.533557, longitude: 46.034257),
@@ -50,14 +53,45 @@ struct RouterScreen: View {
     @State private var routeSteps: [RouteInstructionStep] = []
     @State private var routeSummary: String?
     @State private var wheelchairLongWarning = false
+    /// Текущий видимый регион карты — для отсечения и прореживания маркеров при отдалении.
+    @State private var mapRegion: MKCoordinateRegion = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 51.533557, longitude: 46.034257),
+        span: MKCoordinateSpan(latitudeDelta: 0.06, longitudeDelta: 0.06)
+    )
+    /// Кэш маркеров: пересчитывается только после жеста карты / загрузки данных, не на каждый `body`.
+    @State private var displayedMapObjects: [MapObjectDTO] = []
+    @State private var displayedOverpassPoints: [OverpassPoint] = []
+    @State private var lastLiveLocationApplied: CLLocationCoordinate2D?
+
+    private let overlayPanelMaxHeight: CGFloat = 280
+    private let settingsFabLift: CGFloat = 296
+
+    private var hasRouteInstructions: Bool {
+        !routeSteps.isEmpty || routeSummary != nil
+    }
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                mapPanel
-                    .ignoresSafeArea(edges: .bottom)
+            ZStack(alignment: .bottomTrailing) {
+                VStack(spacing: 0) {
+                    mapPanel
+                    bottomOverlayPanel
+                }
 
-                overlayPanel
+                Button {
+                    showSettingsSheet = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.title2)
+                        .foregroundStyle(.primary)
+                        .frame(width: 52, height: 52)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().stroke(Color(.systemGray4), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Настройки")
+                .padding(.trailing, 14)
+                .padding(.bottom, settingsFabLift)
             }
             .navigationTitle("Маршрутизатор")
             .navigationBarTitleDisplayMode(.inline)
@@ -73,41 +107,29 @@ struct RouterScreen: View {
             }
             .onAppear {
                 locationProvider.start()
+                refreshDisplayedAnnotations(for: mapRegion)
+            }
+            .onChange(of: navigationMode) { _, on in
+                locationProvider.setHighAccuracyNavigationMode(on)
+            }
+            .onChange(of: useCurrentLocationAsFrom) { _, on in
+                if on { lastLiveLocationApplied = nil }
             }
             .onReceive(locationProvider.$currentLocation) { loc in
                 guard useCurrentLocationAsFrom, let loc else { return }
-                fromPoint = loc
-                fromText = String(format: "%.6f, %.6f", loc.latitude, loc.longitude)
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    if auth.loading {
-                        ProgressView().scaleEffect(0.85)
-                    } else if let u = auth.user {
-                        let trimmed = (u.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                        Text(trimmed.isEmpty ? (u.email ?? "…") : trimmed)
-                            .font(.caption)
-                            .lineLimit(1)
-                    }
-                    Button("Добавить") {
-                        if auth.user != nil {
-                            showAddObject = true
-                        } else {
-                            showLogin = true
-                        }
-                    }
-                    if auth.user != nil {
-                        Button("Выйти") {
-                            Task { await auth.logout() }
-                        }
-                    } else {
-                        Button("Войти") { showLogin = true }
-                    }
-                    Button("Сервер") { showServerSettings = true }
+                if let prev = lastLiveLocationApplied {
+                    let a = CLLocation(latitude: prev.latitude, longitude: prev.longitude)
+                    let b = CLLocation(latitude: loc.latitude, longitude: loc.longitude)
+                    if a.distance(from: b) < 18 { return }
                 }
+                lastLiveLocationApplied = loc
+                applyFromSelection(
+                    text: String(format: "%.6f, %.6f", loc.latitude, loc.longitude),
+                    coordinate: loc,
+                )
             }
-            .sheet(isPresented: $showServerSettings) {
-                serverSettingsSheet
+            .sheet(isPresented: $showSettingsSheet) {
+                settingsSheet
             }
             .sheet(isPresented: $showLogin) {
                 LoginSheet(auth: auth) { showLogin = false }
@@ -140,7 +162,7 @@ struct RouterScreen: View {
         }
     }
 
-    private var overlayPanel: some View {
+    private var bottomOverlayPanel: some View {
         VStack(spacing: 8) {
             ScrollView {
                 VStack(spacing: 10) {
@@ -151,12 +173,131 @@ struct RouterScreen: View {
                 .padding(10)
             }
             .scrollIndicators(.hidden)
-            .frame(maxHeight: 280)
+            .frame(maxHeight: overlayPanelMaxHeight)
         }
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.systemGray4), lineWidth: 1))
         .padding(.horizontal, 10)
-        .padding(.top, 4)
+        .padding(.bottom, 6)
+    }
+
+    private var settingsSheet: some View {
+        NavigationStack {
+            Form {
+                if auth.loading {
+                    Section {
+                        HStack {
+                            ProgressView()
+                            Text("Загрузка…")
+                        }
+                    }
+                } else if let u = auth.user {
+                    Section("Аккаунт") {
+                        LabeledContent("Имя") {
+                            Text((u.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : (u.name ?? ""))
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Email") {
+                            Text(u.email ?? "—")
+                                .textSelection(.enabled)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                }
+                Section("Действия") {
+                    Button {
+                        showSettingsSheet = false
+                        if auth.user != nil {
+                            showAddObject = true
+                        } else {
+                            showLogin = true
+                        }
+                    } label: {
+                        Label("Добавить объект", systemImage: "plus.circle")
+                    }
+                    if auth.user != nil {
+                        Button(role: .destructive) {
+                            showSettingsSheet = false
+                            Task { await auth.logout() }
+                        } label: {
+                            Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    } else {
+                        Button {
+                            showSettingsSheet = false
+                            showLogin = true
+                        } label: {
+                            Label("Войти или регистрация", systemImage: "person.crop.circle.badge.plus")
+                        }
+                    }
+                }
+                Section("URL сервера") {
+                    TextField("https://host:port", text: $serverURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+            }
+            .navigationTitle("Настройки")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Готово") {
+                        MapipConfig.baseURLString = serverURL
+                        showSettingsSheet = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func refreshDisplayedAnnotations(for region: MKCoordinateRegion) {
+        let span = max(region.span.latitudeDelta, region.span.longitudeDelta)
+        let inView = objects.filter { region.containsCoordinate(lat: $0.x, lon: $0.y) }
+        let maxCount: Int
+        if span > 0.22 {
+            maxCount = 16
+        } else if span > 0.10 {
+            maxCount = 36
+        } else if span > 0.045 {
+            maxCount = 72
+        } else {
+            maxCount = 160
+        }
+        displayedMapObjects = spatialSample(inView, maxCount: maxCount, around: region.center)
+
+        if span < 0.09 {
+            let inVO = overpassPoints.filter { region.containsCoordinate(lat: $0.lat, lon: $0.lon) }
+            let cap = span < 0.035 ? 48 : 24
+            displayedOverpassPoints = spatialSampleOverpass(inVO, maxCount: cap, around: region.center)
+        } else {
+            displayedOverpassPoints = []
+        }
+    }
+
+    private func spatialSample(_ items: [MapObjectDTO], maxCount: Int, around center: CLLocationCoordinate2D) -> [MapObjectDTO] {
+        guard items.count > maxCount, maxCount > 0 else { return items }
+        let sorted = items.sorted { dist2MapObject($0, center) < dist2MapObject($1, center) }
+        let step = max(1, sorted.count / maxCount)
+        return Swift.stride(from: 0, to: sorted.count, by: step).prefix(maxCount).map { sorted[$0] }
+    }
+
+    private func spatialSampleOverpass(_ items: [OverpassPoint], maxCount: Int, around center: CLLocationCoordinate2D) -> [OverpassPoint] {
+        guard items.count > maxCount, maxCount > 0 else { return items }
+        let sorted = items.sorted { dist2Overpass($0, center) < dist2Overpass($1, center) }
+        let step = max(1, sorted.count / maxCount)
+        return Swift.stride(from: 0, to: sorted.count, by: step).prefix(maxCount).map { sorted[$0] }
+    }
+
+    private func dist2MapObject(_ o: MapObjectDTO, _ c: CLLocationCoordinate2D) -> Double {
+        let dLat = o.x - c.latitude
+        let dLon = o.y - c.longitude
+        return dLat * dLat + dLon * dLon
+    }
+
+    private func dist2Overpass(_ p: OverpassPoint, _ c: CLLocationCoordinate2D) -> Double {
+        let dLat = p.lat - c.latitude
+        let dLon = p.lon - c.longitude
+        return dLat * dLat + dLon * dLon
     }
 
     private var controlsPanel: some View {
@@ -196,8 +337,7 @@ struct RouterScreen: View {
     }
 
     private var mapPanel: some View {
-        ZStack(alignment: .topTrailing) {
-            MapReader { proxy in
+        MapReader { proxy in
             Map(position: $position) {
                 UserAnnotation()
                 if let from = fromPoint {
@@ -206,7 +346,7 @@ struct RouterScreen: View {
                 if let to = toPoint {
                     Annotation("Финиш", coordinate: to) { Circle().fill(.red).frame(width: 11, height: 11) }
                 }
-                ForEach(objects) { o in
+                ForEach(displayedMapObjects) { o in
                     Annotation(o.display_name, coordinate: CLLocationCoordinate2D(latitude: o.x, longitude: o.y)) {
                         Button {
                             selectedObject = o
@@ -219,7 +359,7 @@ struct RouterScreen: View {
                         .accessibilityLabel(o.display_name)
                     }
                 }
-                ForEach(overpassPoints) { p in
+                ForEach(displayedOverpassPoints) { p in
                     Annotation(p.title, coordinate: CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)) {
                         Circle()
                             .fill(.orange)
@@ -232,17 +372,23 @@ struct RouterScreen: View {
                         .stroke(colorForRoute(index: line.index), lineWidth: line.index == 0 ? 6 : 4)
                 }
             }
+            .onMapCameraChange(frequency: .onEnd) { context in
+                mapRegion = context.region
+                refreshDisplayedAnnotations(for: context.region)
+            }
             .onTapGesture { p in
                 guard let target = mapPickTarget else { return }
                 guard let coord = proxy.convert(p, from: .local) else { return }
                 if target == .from {
-                    fromPoint = coord
-                    fromText = String(format: "%.6f, %.6f", coord.latitude, coord.longitude)
-                    fromSuggestions = []
+                    applyFromSelection(
+                        text: String(format: "%.6f, %.6f", coord.latitude, coord.longitude),
+                        coordinate: coord,
+                    )
                 } else {
-                    toPoint = coord
-                    toText = String(format: "%.6f, %.6f", coord.latitude, coord.longitude)
-                    toSuggestions = []
+                    applyToSelection(
+                        text: String(format: "%.6f, %.6f", coord.latitude, coord.longitude),
+                        coordinate: coord,
+                    )
                 }
                 mapPickTarget = nil
             }
@@ -251,63 +397,53 @@ struct RouterScreen: View {
                 MapCompass()
                 MapUserLocationButton()
             }
-            }
-            if !routeSteps.isEmpty || routeSummary != nil {
-                routeInstructionsCorner
-            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var routeInstructionsCorner: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
+    private func applyFromSelection(text: String, coordinate: CLLocationCoordinate2D) {
+        suppressFromSuggestionsOnNextTextChange = true
+        fromText = text
+        fromPoint = coordinate
+        fromSuggestions = []
+    }
+
+    private func applyToSelection(text: String, coordinate: CLLocationCoordinate2D) {
+        suppressToSuggestionsOnNextTextChange = true
+        toText = text
+        toPoint = coordinate
+        toSuggestions = []
+    }
+
+    @ViewBuilder
+    private var routeInstructionsPanel: some View {
+        if hasRouteInstructions {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Пошагово").font(.caption.weight(.semibold))
                 if wheelchairLongWarning {
                     Text("Внимание: для коляски маршрут длиннее 7 км или дольше 45 минут — оцените силы.")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                         .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.orange.opacity(0.15))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                Text("Маршрут").font(.subheadline.weight(.semibold))
-                if let routeSummary {
-                    Text(routeSummary).font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(routeSteps) { step in
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(step.text).font(.caption)
-                        Spacer(minLength: 4)
-                        if let d = step.distanceM, d > 0 {
-                            Text("\(Int(round(d))) м")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            .padding(10)
-        }
-        .frame(maxWidth: 300, maxHeight: 260)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
-        .padding(.top, 52)
-        .padding(.trailing, 8)
-    }
-
-    @ViewBuilder
-    private var routeInstructionsPanel: some View {
-        if !routeSteps.isEmpty || routeSummary != nil {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Пошагово").font(.caption.weight(.semibold))
                 if let routeSummary {
                     Text(routeSummary).font(.caption2).foregroundStyle(.secondary)
                 }
-                ForEach(Array(routeSteps.prefix(6))) { step in
-                    Text(step.text).font(.caption2).lineLimit(3)
-                }
-                if routeSteps.count > 6 {
-                    Text("… ещё \(routeSteps.count - 6) шагов — см. блок на карте").font(.caption2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(routeSteps) { step in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(step.text).font(.caption2)
+                            Spacer(minLength: 4)
+                            if let d = step.distanceM, d > 0 {
+                                Text("\(Int(round(d))) м")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -327,6 +463,10 @@ struct RouterScreen: View {
                     .background(Color(.systemGray6))
                     .clipShape(RoundedRectangle(cornerRadius: 9))
                     .onChange(of: fromText) { _, new in
+                        if suppressFromSuggestionsOnNextTextChange {
+                            suppressFromSuggestionsOnNextTextChange = false
+                            return
+                        }
                         fromSuggestVersion += 1
                         let version = fromSuggestVersion
                         toSuggestions = []
@@ -342,9 +482,10 @@ struct RouterScreen: View {
             }
             if !fromSuggestions.isEmpty {
                 suggestionList(fromSuggestions) { hit in
-                    fromText = hit.display_name
-                    fromPoint = CLLocationCoordinate2D(latitude: hit.lat, longitude: hit.lon)
-                    fromSuggestions = []
+                    applyFromSelection(
+                        text: hit.display_name,
+                        coordinate: CLLocationCoordinate2D(latitude: hit.lat, longitude: hit.lon),
+                    )
                 }
             }
         }
@@ -360,6 +501,10 @@ struct RouterScreen: View {
                     .background(Color(.systemGray6))
                     .clipShape(RoundedRectangle(cornerRadius: 9))
                     .onChange(of: toText) { _, new in
+                        if suppressToSuggestionsOnNextTextChange {
+                            suppressToSuggestionsOnNextTextChange = false
+                            return
+                        }
                         toSuggestVersion += 1
                         let version = toSuggestVersion
                         fromSuggestions = []
@@ -374,9 +519,10 @@ struct RouterScreen: View {
             }
             if !toSuggestions.isEmpty {
                 suggestionList(toSuggestions) { hit in
-                    toText = hit.display_name
-                    toPoint = CLLocationCoordinate2D(latitude: hit.lat, longitude: hit.lon)
-                    toSuggestions = []
+                    applyToSelection(
+                        text: hit.display_name,
+                        coordinate: CLLocationCoordinate2D(latitude: hit.lat, longitude: hit.lon),
+                    )
                 }
             }
         }
@@ -426,30 +572,6 @@ struct RouterScreen: View {
             .padding(.vertical, 8)
             .background(Color(.systemGray6))
             .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-    }
-
-    private var serverSettingsSheet: some View {
-        NavigationStack {
-            Form {
-                Section("URL сервера") {
-                    TextField("https://host:port", text: $serverURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-            }
-            .navigationTitle("Настройки сервера")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Закрыть") { showServerSettings = false }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Сохранить") {
-                        MapipConfig.baseURLString = serverURL
-                        showServerSettings = false
-                    }
-                }
-            }
         }
     }
 
@@ -531,6 +653,8 @@ struct RouterScreen: View {
         routeSteps = []
         routeSummary = nil
         wheelchairLongWarning = false
+        fromSuggestions = []
+        toSuggestions = []
         guard !fromText.isEmpty, !toText.isEmpty else {
             error = "Заполните оба поля"
             return
@@ -539,8 +663,10 @@ struct RouterScreen: View {
             let resolvedFrom: CLLocationCoordinate2D
             if useCurrentLocationAsFrom, let current = locationProvider.currentLocation {
                 resolvedFrom = current
-                fromPoint = current
-                fromText = String(format: "%.6f, %.6f", current.latitude, current.longitude)
+                applyFromSelection(
+                    text: String(format: "%.6f, %.6f", current.latitude, current.longitude),
+                    coordinate: current,
+                )
             } else if let fromPoint {
                 resolvedFrom = fromPoint
             } else {
@@ -605,6 +731,8 @@ struct RouterScreen: View {
             }
             if let reg = boundingRegion(for: lines.flatMap(\.coordinates)) {
                 position = .region(reg)
+                mapRegion = reg
+                refreshDisplayedAnnotations(for: reg)
             }
             var msg = "Маршрутов: \(lines.count)"
             if lines.count < alternatives {
@@ -627,13 +755,17 @@ struct RouterScreen: View {
                 }
                 Section("Маршрут") {
                     Button("Откуда") {
-                        fromText = o.display_name
-                        fromPoint = CLLocationCoordinate2D(latitude: o.x, longitude: o.y)
+                        applyFromSelection(
+                            text: o.display_name,
+                            coordinate: CLLocationCoordinate2D(latitude: o.x, longitude: o.y),
+                        )
                         selectedObject = nil
                     }
                     Button("Куда") {
-                        toText = o.display_name
-                        toPoint = CLLocationCoordinate2D(latitude: o.x, longitude: o.y)
+                        applyToSelection(
+                            text: o.display_name,
+                            coordinate: CLLocationCoordinate2D(latitude: o.x, longitude: o.y),
+                        )
                         selectedObject = nil
                     }
                 }
@@ -654,6 +786,17 @@ struct RouterScreen: View {
         } catch {
             objects = []
         }
+        refreshDisplayedAnnotations(for: mapRegion)
+    }
+}
+
+private extension MKCoordinateRegion {
+    func containsCoordinate(lat: Double, lon: Double) -> Bool {
+        let latMin = center.latitude - span.latitudeDelta / 2
+        let latMax = center.latitude + span.latitudeDelta / 2
+        let lonMin = center.longitude - span.longitudeDelta / 2
+        let lonMax = center.longitude + span.longitudeDelta / 2
+        return lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax
     }
 }
 
@@ -874,6 +1017,7 @@ private struct NavigationFollowView: View {
                 }
                 UserAnnotation()
             }
+            .safeAreaPadding(.bottom, 130)
             .mapStyle(.standard(elevation: .realistic))
             .mapControls {
                 MapCompass()
@@ -891,6 +1035,7 @@ private struct NavigationFollowView: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding()
+            .padding(.bottom, 6)
             .frame(maxWidth: .infinity)
             .background(.ultraThinMaterial)
         }
