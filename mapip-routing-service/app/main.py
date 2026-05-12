@@ -112,6 +112,7 @@ async def _post_ors(profile: str, payload: dict[str, Any]) -> httpx.Response:
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     merged = dict(payload)
     merged.setdefault("instructions", True)
+    merged.setdefault("language", "ru")
     async with httpx.AsyncClient(timeout=60.0) as client:
         return await client.post(url, params=params, headers=headers, json=merged)
 
@@ -371,6 +372,7 @@ async def _post_ors_json_geo(profile: str, payload: dict[str, Any]) -> httpx.Res
         "elevation": False,
         "geometry_simplify": False,
     }
+    body.setdefault("language", "ru")
     async with httpx.AsyncClient(timeout=60.0) as client:
         return await client.post(url, params=params, headers=headers, json=body)
 
@@ -384,6 +386,7 @@ async def _post_ors_json_instructions_only(profile: str, coordinates: list[list[
         "coordinates": coordinates,
         "instructions": True,
         "elevation": False,
+        "language": "ru",
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         r = await client.post(url, params=params, headers=headers, json=body)
