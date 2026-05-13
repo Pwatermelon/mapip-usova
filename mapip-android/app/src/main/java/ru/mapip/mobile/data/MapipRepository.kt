@@ -1,7 +1,6 @@
 package ru.mapip.mobile.data
 
 import android.content.Context
-import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
@@ -116,7 +115,7 @@ class MapipRepository(private val appContext: Context) {
             put("profile", profile)
             put("alternativeCount", alternativeCount)
             if (via != null) {
-                put("via", JSONArray(listOf(JSONArray(listOf(via.first, via.second))))))
+                put("via", JSONArray(listOf(JSONArray(listOf(via.first, via.second)))))
             }
         }
         val media = "application/json; charset=utf-8".toMediaType()

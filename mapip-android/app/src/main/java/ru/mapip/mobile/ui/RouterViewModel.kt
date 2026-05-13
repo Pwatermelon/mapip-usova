@@ -3,12 +3,12 @@ package ru.mapip.mobile.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.osmdroid.util.GeoPoint
 import ru.mapip.mobile.data.CurrentUserDto
 import ru.mapip.mobile.data.GeocodeHit
 import ru.mapip.mobile.data.MapObjectDto
@@ -18,15 +18,15 @@ import ru.mapip.mobile.data.RouteGeometry
 import ru.mapip.mobile.data.RouteInstructionStep
 import ru.mapip.mobile.data.RouteJson
 
-data class RouteLine(val points: List<LatLng>, val index: Int)
+data class RouteLine(val points: List<GeoPoint>, val index: Int)
 
 data class RouterUiState(
     val loadingUser: Boolean = false,
     val user: CurrentUserDto? = null,
     val fromText: String = "",
     val toText: String = "",
-    val fromPoint: LatLng? = null,
-    val toPoint: LatLng? = null,
+    val fromPoint: GeoPoint? = null,
+    val toPoint: GeoPoint? = null,
     val fromSuggestions: List<GeocodeHit> = emptyList(),
     val toSuggestions: List<GeocodeHit> = emptyList(),
     val profile: String = "wheelchair",
@@ -42,10 +42,10 @@ data class RouterUiState(
     val mapPickTarget: MapPick? = null,
     val useCurrentLocationAsFrom: Boolean = false,
     val selectedObject: MapObjectDto? = null,
-    val navigationRoute: List<LatLng> = emptyList(),
+    val navigationRoute: List<GeoPoint> = emptyList(),
     val fromSuggestVersion: Int = 0,
     val toSuggestVersion: Int = 0,
-    val cameraCenter: LatLng? = null,
+    val cameraCenter: GeoPoint? = null,
     val cameraLatSpan: Double = 0.06,
     val cameraLonSpan: Double = 0.06,
 )
@@ -162,7 +162,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun setFromPoint(p: LatLng) {
+    fun setFromPoint(p: GeoPoint) {
         _ui.update {
             it.copy(
                 fromPoint = p,
@@ -173,7 +173,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun setToPoint(p: LatLng) {
+    fun setToPoint(p: GeoPoint) {
         _ui.update {
             it.copy(
                 toPoint = p,
@@ -206,7 +206,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
         _ui.update {
             it.copy(
                 fromText = hit.displayName,
-                fromPoint = LatLng(hit.lat, hit.lon),
+                fromPoint = GeoPoint(hit.lat, hit.lon),
                 fromSuggestions = emptyList(),
             )
         }
@@ -216,7 +216,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
         _ui.update {
             it.copy(
                 toText = hit.displayName,
-                toPoint = LatLng(hit.lat, hit.lon),
+                toPoint = GeoPoint(hit.lat, hit.lon),
                 toSuggestions = emptyList(),
             )
         }
@@ -226,7 +226,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
         _ui.update { it.copy(selectedObject = o) }
     }
 
-    fun setCurrentLocationAsFrom(loc: LatLng) {
+    fun setCurrentLocationAsFrom(loc: GeoPoint) {
         _ui.update {
             it.copy(
                 fromPoint = loc,
@@ -256,7 +256,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun buildRoute(currentLocation: LatLng?) {
+    fun buildRoute(currentLocation: GeoPoint?) {
         viewModelScope.launch {
             _ui.update {
                 it.copy(
@@ -275,7 +275,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
             try {
-                val resolvedFrom: LatLng = if (s.useCurrentLocationAsFrom && currentLocation != null) {
+                val resolvedFrom: GeoPoint = if (s.useCurrentLocationAsFrom && currentLocation != null) {
                     _ui.update { it.copy(fromPoint = currentLocation, fromText = String.format("%.6f, %.6f", currentLocation.latitude, currentLocation.longitude)) }
                     currentLocation
                 } else if (s.fromPoint != null) {
@@ -286,12 +286,12 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
                         _ui.update { it.copy(error = "Точка «Откуда» не найдена") }
                         return@launch
                     }
-                    val p = LatLng(fa.lat, fa.lon)
+                    val p = GeoPoint(fa.lat, fa.lon)
                     _ui.update { it.copy(fromPoint = p) }
                     p
                 }
 
-                val resolvedTo: LatLng = if (s.toPoint != null) {
+                val resolvedTo: GeoPoint = if (s.toPoint != null) {
                     s.toPoint!!
                 } else {
                     val b = repo.geocode(s.toText)
@@ -299,7 +299,7 @@ class RouterViewModel(application: Application) : AndroidViewModel(application) 
                         _ui.update { it.copy(error = "Точка «Куда» не найдена") }
                         return@launch
                     }
-                    val p = LatLng(fb.lat, fb.lon)
+                    val p = GeoPoint(fb.lat, fb.lon)
                     _ui.update { it.copy(toPoint = p) }
                     p
                 }

@@ -1,6 +1,6 @@
 package ru.mapip.mobile.data
 
-import com.google.android.gms.maps.model.LatLng
+import org.osmdroid.util.GeoPoint
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -77,22 +77,22 @@ object RouteJson {
     }
 
     /** Координаты полилинии в порядке lat, lng (как в iOS после swap из GeoJSON). */
-    fun decodeLines(data: ByteArray): List<List<LatLng>> {
+    fun decodeLines(data: ByteArray): List<List<GeoPoint>> {
         val obj = JSONObject(String(data))
         val features = obj.optJSONArray("features") ?: return emptyList()
-        val out = mutableListOf<List<LatLng>>()
+        val out = mutableListOf<List<GeoPoint>>()
         for (i in 0 until features.length()) {
             val f = features.optJSONObject(i) ?: continue
             val geom = f.optJSONObject("geometry") ?: continue
             if (geom.optString("type") != "LineString") continue
             val coords = geom.optJSONArray("coordinates") ?: continue
-            val line = mutableListOf<LatLng>()
+            val line = mutableListOf<GeoPoint>()
             for (j in 0 until coords.length()) {
                 val pair = coords.optJSONArray(j) ?: continue
                 if (pair.length() < 2) continue
                 val lon = pair.getDouble(0)
                 val lat = pair.getDouble(1)
-                line.add(LatLng(lat, lon))
+                line.add(GeoPoint(lat, lon))
             }
             if (line.size >= 2) out.add(line)
         }

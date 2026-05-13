@@ -2,8 +2,16 @@ package ru.mapip.mobile.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Looper
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -23,6 +31,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -58,29 +69,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.LatLngBounds
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapProperties
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.Polyline
-import com.google.maps.android.compose.rememberCameraPositionState
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import ru.mapip.mobile.data.GeocodeHit
 import ru.mapip.mobile.data.MapipConfig
 
@@ -101,54 +110,88 @@ fun RouterApp(vm: RouterViewModel) {
 
     val fineGranted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
+    val coarseGranted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+    val locationGranted = fineGranted || coarseGranted
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) { /* fused starts in DisposableEffect */ }
     }
 
-    var lastLoc by remember { mutableStateOf<LatLng?>(null) }
+    Configuration.getInstance().userAgentValue = ctx.packageName
+    var lastLoc by remember { mutableStateOf<GeoPoint?>(null) }
+    var centeredOnMyLocation by remember { mutableStateOf(false) }
     var bearing by remember { mutableFloatStateOf(0f) }
-    val fused = remember { LocationServices.getFusedLocationProviderClient(ctx) }
+    val locationManager = remember { ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
+    val mapView = remember {
+        MapView(ctx).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            controller.setZoom(12.0)
+            controller.setCenter(GeoPoint(51.533557, 46.034257))
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { mapView.onDetach() }
+    }
 
     DisposableEffect(ui.useCurrentLocationAsFrom, ui.navigationRoute.isNotEmpty(), fineGranted) {
-        if (!fineGranted) {
+        if (!locationGranted) {
             return@DisposableEffect onDispose { }
         }
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
-            .setMinUpdateIntervalMillis(500L)
-            .build()
-        val cb = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                val l = result.lastLocation ?: return
-                lastLoc = LatLng(l.latitude, l.longitude)
-                if (l.hasBearing()) bearing = l.bearing
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                lastLoc = GeoPoint(location.latitude, location.longitude)
+                if (location.hasBearing()) bearing = location.bearing
             }
         }
-        fused.requestLocationUpdates(req, cb, Looper.getMainLooper())
-        onDispose { fused.removeLocationUpdates(cb) }
+        runCatching {
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 2f, listener)
+            }
+        }
+        runCatching {
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1500L, 5f, listener)
+            }
+        }
+        onDispose { locationManager.removeUpdates(listener) }
     }
 
     LaunchedEffect(Unit) {
-        if (!fineGranted) return@LaunchedEffect
-        fused.lastLocation.addOnSuccessListener { l ->
-            if (l != null) lastLoc = LatLng(l.latitude, l.longitude)
+        if (!locationGranted) {
+            permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            return@LaunchedEffect
         }
-    }
-
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(LatLng(51.533557, 46.034257), 12f)
+        val known = locationManager.allProviders
+            .mapNotNull { p -> runCatching { locationManager.getLastKnownLocation(p) }.getOrNull() }
+            .maxByOrNull { it.time }
+        if (known != null) {
+            lastLoc = GeoPoint(known.latitude, known.longitude)
+            if (!centeredOnMyLocation) {
+                mapView.controller.animateTo(lastLoc)
+                mapView.controller.setZoom(16.0)
+                centeredOnMyLocation = true
+            }
+        }
     }
 
     LaunchedEffect(ui.cameraCenter, ui.cameraLatSpan, ui.cameraLonSpan) {
         val c = ui.cameraCenter ?: return@LaunchedEffect
-        val b = LatLngBounds.builder()
         val halfLat = ui.cameraLatSpan / 2
         val halfLon = ui.cameraLonSpan / 2
-        b.include(LatLng(c.latitude - halfLat, c.longitude - halfLon))
-        b.include(LatLng(c.latitude + halfLat, c.longitude + halfLon))
         runCatching {
-            cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(b.build(), 48))
+            mapView.zoomToBoundingBox(
+                BoundingBox(
+                    c.latitude + halfLat,
+                    c.longitude + halfLon,
+                    c.latitude - halfLat,
+                    c.longitude - halfLon,
+                ),
+                true,
+                48,
+            )
         }
     }
 
@@ -158,26 +201,27 @@ fun RouterApp(vm: RouterViewModel) {
         Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Маршрутизатор") },
+                title = {
+                    Text(
+                        "Маршрутизатор",
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 actions = {
                     if (ui.loadingUser) {
                         CircularProgressIndicator(Modifier.padding(8.dp), strokeWidth = 2.dp)
-                    } else {
-                        val label = ui.user?.name?.trim()?.takeIf { it.isNotEmpty() }
-                            ?: ui.user?.email?.take(12) ?: ""
-                        if (label.isNotEmpty()) {
-                            Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 4.dp))
-                        }
                     }
-                    TextButton(
+                    IconButton(
                         onClick = {
                             if (ui.user != null) showAdd = true else showLogin = true
                         },
-                    ) { Text("Добавить") }
+                    ) { Icon(Icons.Default.Add, contentDescription = "Добавить") }
                     if (ui.user != null) {
-                        TextButton(onClick = { vm.logout() }) { Text("Выйти") }
+                        IconButton(onClick = { vm.logout() }) { Icon(Icons.Default.Logout, contentDescription = "Выйти") }
                     } else {
-                        TextButton(onClick = { showLogin = true }) { Text("Войти") }
+                        IconButton(onClick = { showLogin = true }) { Icon(Icons.Default.Login, contentDescription = "Войти") }
                     }
                     IconButton(onClick = {
                         serverDraft = MapipConfig.getBaseUrl(ctx)
@@ -190,83 +234,112 @@ fun RouterApp(vm: RouterViewModel) {
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            GoogleMap(
+            AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                properties = MapProperties(isMyLocationEnabled = fineGranted),
-                uiSettings = MapUiSettings(compassEnabled = true, myLocationButtonEnabled = fineGranted),
-                onMapClick = { latLng ->
-                    when (ui.mapPickTarget) {
-                        MapPick.FROM -> vm.setFromPoint(latLng)
-                        MapPick.TO -> vm.setToPoint(latLng)
-                        null -> {}
-                    }
-                },
-            ) {
-                ui.fromPoint?.let { p ->
-                    Marker(state = MarkerState(position = p), title = "Старт", icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
-                }
-                ui.toPoint?.let { p ->
-                    Marker(state = MarkerState(position = p), title = "Финиш", icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
-                }
-                for (o in ui.objects) {
-                    val p = LatLng(o.lat, o.lng)
-                    Marker(
-                        state = MarkerState(position = p),
-                        title = o.displayName,
-                        snippet = o.address,
-                        onClick = {
-                            vm.selectObject(o)
-                            true
-                        },
-                    )
-                }
-                for (op in ui.overpassPoints) {
-                    Marker(
-                        state = MarkerState(position = LatLng(op.lat, op.lon)),
-                        title = op.title,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
-                    )
-                }
-                for (line in ui.lines) {
-                    Polyline(
-                        points = line.points,
-                        color = routeColors.getOrElse(line.index) { routeColors.last() },
-                        width = if (line.index == 0) 12f else 9f,
-                    )
-                }
-            }
-
-            if (ui.routeSteps.isNotEmpty() || ui.routeSummary != null) {
-                Card(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 8.dp, end = 8.dp)
-                        .widthIn(max = 300.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
-                ) {
-                    Column(Modifier.padding(10.dp).verticalScroll(rememberScrollState()).height(220.dp)) {
-                        if (ui.wheelchairLongWarning) {
-                            Text(
-                                "Внимание: для коляски маршрут длиннее 7 км или дольше 45 минут.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFFE65100),
-                            )
-                            Spacer(Modifier.height(6.dp))
+                factory = { mapView },
+                update = { map ->
+                    val startIcon = circleDrawable(ctx, 24, Color(0xFF1976D2))
+                    val finishIcon = circleDrawable(ctx, 24, Color(0xFFD32F2F))
+                    val objectIcon = circleDrawable(ctx, 18, Color(0xFF7B1FA2))
+                    val overpassIcon = circleDrawable(ctx, 16, Color(0xFFFF9800))
+                    val currentLocIcon = circleDrawable(ctx, 16, Color(0xFF00ACC1))
+                    map.overlays.clear()
+                    if (locationGranted) {
+                        val myLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(ctx), map).apply {
+                            enableMyLocation()
+                            enableFollowLocation()
+                            isDrawAccuracyEnabled = true
                         }
-                        Text("Маршрут", fontWeight = FontWeight.SemiBold)
-                        ui.routeSummary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        ui.routeSteps.take(12).forEach { st ->
-                            Row(Modifier.padding(vertical = 2.dp)) {
-                                Text(st.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                                st.distanceM?.takeIf { it > 0 }?.let {
-                                    Text("${it.toInt()} м", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        map.overlays.add(myLocationOverlay)
+                    }
+                    map.overlays.add(
+                        MapEventsOverlay(
+                            object : MapEventsReceiver {
+                                override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
+                                    when (ui.mapPickTarget) {
+                                        MapPick.FROM -> vm.setFromPoint(p)
+                                        MapPick.TO -> vm.setToPoint(p)
+                                        null -> {}
+                                    }
+                                    return true
                                 }
-                            }
+
+                                override fun longPressHelper(p: GeoPoint): Boolean = false
+                            },
+                        ),
+                    )
+                    lastLoc?.let { p ->
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = p
+                                title = "Текущее местоположение"
+                                icon = currentLocIcon
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            },
+                        )
+                        if (!centeredOnMyLocation) {
+                            map.controller.animateTo(p)
+                            map.controller.setZoom(16.0)
+                            centeredOnMyLocation = true
                         }
                     }
-                }
-            }
+                    ui.fromPoint?.let { p ->
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = p
+                                title = "Старт"
+                                icon = startIcon
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            },
+                        )
+                    }
+                    ui.toPoint?.let { p ->
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = p
+                                title = "Финиш"
+                                icon = finishIcon
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            },
+                        )
+                    }
+                    for (o in ui.objects) {
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = GeoPoint(o.lat, o.lng)
+                                title = o.displayName
+                                snippet = o.address
+                                icon = objectIcon
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                setOnMarkerClickListener { _, _ ->
+                                    vm.selectObject(o)
+                                    true
+                                }
+                            },
+                        )
+                    }
+                    for (op in ui.overpassPoints) {
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = GeoPoint(op.lat, op.lon)
+                                title = op.title
+                                icon = overpassIcon
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            },
+                        )
+                    }
+                    for (line in ui.lines) {
+                        map.overlays.add(
+                            Polyline().apply {
+                                setPoints(line.points)
+                                color = routeColors.getOrElse(line.index) { routeColors.last() }.toArgb()
+                                width = if (line.index == 0) 12f else 9f
+                            },
+                        )
+                    }
+                    map.invalidate()
+                },
+            )
 
             Card(
                 Modifier
@@ -295,15 +368,10 @@ fun RouterApp(vm: RouterViewModel) {
                         ) {
                             Text(if (ui.mapPickTarget == MapPick.FROM) "Тап на карте…" else "На карте")
                         }
-                        if (!fineGranted) {
-                            OutlinedButton(onClick = { permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) }) {
-                                Text("Гео")
-                            }
-                        }
                     }
                     ui.fromSuggestions.take(5).forEach { h ->
                         Text(
-                            h.display_name,
+                            h.displayName,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
@@ -325,7 +393,7 @@ fun RouterApp(vm: RouterViewModel) {
                     }
                     ui.toSuggestions.take(5).forEach { h ->
                         Text(
-                            h.display_name,
+                            h.displayName,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
@@ -362,7 +430,13 @@ fun RouterApp(vm: RouterViewModel) {
                         ) { Text("Навигация") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = ui.useCurrentLocationAsFrom, onCheckedChange = { vm.setUseCurrentLocationAsFrom(it) })
+                        Checkbox(
+                            checked = ui.useCurrentLocationAsFrom,
+                            onCheckedChange = {
+                                if (it && !fineGranted) permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                                vm.setUseCurrentLocationAsFrom(it)
+                            },
+                        )
                         Text("Текущее местоположение для «Откуда»", style = MaterialTheme.typography.bodySmall)
                     }
                     ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -478,33 +552,41 @@ fun RouterApp(vm: RouterViewModel) {
 
 @Composable
 private fun NavigationOverlay(
-    route: List<LatLng>,
-    lastLocation: LatLng?,
+    route: List<GeoPoint>,
+    lastLocation: GeoPoint?,
     bearing: Float,
     fineGranted: Boolean,
     onClose: () -> Unit,
 ) {
-    val cameraPositionState = rememberCameraPositionState()
-    LaunchedEffect(lastLocation, bearing, route) {
+    val ctx = LocalContext.current
+    Configuration.getInstance().userAgentValue = ctx.packageName
+    val mapView = remember {
+        MapView(ctx).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            controller.setZoom(17.0)
+        }
+    }
+    DisposableEffect(Unit) { onDispose { mapView.onDetach() } }
+    LaunchedEffect(lastLocation, bearing, route, fineGranted) {
+        mapView.overlays.clear()
+        mapView.overlays.add(
+            Polyline().apply {
+                setPoints(route)
+                color = Color(0xFF2E7D32).toArgb()
+                width = 14f
+            },
+        )
         val target = lastLocation ?: route.first()
-        val cam = CameraPosition.builder()
-            .target(target)
-            .zoom(17f)
-            .tilt(50f)
-            .bearing(if (fineGranted && bearing != 0f) bearing else 0f)
-            .build()
-        cameraPositionState.animate(CameraUpdateFactory.newCameraPosition(cam), 400)
+        mapView.controller.animateTo(target)
+        if (fineGranted && bearing != 0f) mapView.mapOrientation = bearing
+        mapView.invalidate()
     }
     Box(Modifier.fillMaxSize()) {
-        GoogleMap(
+        AndroidView(
             modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(isMyLocationEnabled = fineGranted),
-        ) {
-            if (route.size >= 2) {
-                Polyline(points = route, color = Color(0xFF2E7D32), width = 14f)
-            }
-        }
+            factory = { mapView },
+        )
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -570,3 +652,18 @@ private fun LoginSheetContent(
         Spacer(Modifier.height(24.dp))
     }
 }
+
+private fun circleBitmap(sizeDp: Int, color: Color): Bitmap {
+    val px = (sizeDp * 2.2f).roundToInt().coerceAtLeast(12)
+    val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color.toArgb()
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(px / 2f, px / 2f, px / 2f, paint)
+    return bitmap
+}
+
+private fun circleDrawable(ctx: Context, sizeDp: Int, color: Color): Drawable =
+    BitmapDrawable(ctx.resources, circleBitmap(sizeDp, color))

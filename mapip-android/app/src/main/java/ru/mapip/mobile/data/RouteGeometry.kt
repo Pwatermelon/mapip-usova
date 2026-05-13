@@ -1,15 +1,15 @@
 package ru.mapip.mobile.data
 
-import com.google.android.gms.maps.model.LatLng
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+import org.osmdroid.util.GeoPoint
 
 object RouteGeometry {
 
-    fun bboxString(line: List<LatLng>): String? {
+    fun bboxString(line: List<GeoPoint>): String? {
         if (line.isEmpty()) return null
         var minLat = line[0].latitude
         var maxLat = line[0].latitude
@@ -24,7 +24,7 @@ object RouteGeometry {
         return "$minLon,$minLat,$maxLon,$maxLat"
     }
 
-    fun pickViaCandidates(base: List<LatLng>, points: List<OverpassPoint>, maxCount: Int): List<OverpassPoint> {
+    fun pickViaCandidates(base: List<GeoPoint>, points: List<OverpassPoint>, maxCount: Int): List<OverpassPoint> {
         if (base.size < 2) return emptyList()
         val ranked = points.mapNotNull { p ->
             val foot = nearestFootOnPolyline(base, p.lat, p.lon) ?: return@mapNotNull null
@@ -61,10 +61,10 @@ object RouteGeometry {
         return dLat * dLat + dLon * dLon
     }
 
-    fun isTooSimilarLine(candidate: List<LatLng>, existing: List<List<LatLng>>): Boolean =
+    fun isTooSimilarLine(candidate: List<GeoPoint>, existing: List<List<GeoPoint>>): Boolean =
         existing.any { overlap(candidate, it) >= 0.9 && overlap(it, candidate) >= 0.9 }
 
-    private fun overlap(a: List<LatLng>, b: List<LatLng>, samples: Int = 30): Double {
+    private fun overlap(a: List<GeoPoint>, b: List<GeoPoint>, samples: Int = 30): Double {
         if (a.size <= 1 || b.size <= 1) return 1.0
         var close = 0
         for (i in 0 until samples) {
@@ -76,7 +76,7 @@ object RouteGeometry {
         return close.toDouble() / samples
     }
 
-    private fun nearestDistMeters(p: LatLng, line: List<LatLng>): Double {
+    private fun nearestDistMeters(p: GeoPoint, line: List<GeoPoint>): Double {
         var best = Double.MAX_VALUE
         for (q in line) {
             val d = metersApprox(p.latitude, p.longitude, q.latitude, q.longitude)
@@ -93,7 +93,7 @@ object RouteGeometry {
 
     data class FootResult(val lat: Double, val lon: Double, val distSq: Double, val progress: Double)
 
-    fun nearestFootOnPolyline(route: List<LatLng>, lat: Double, lon: Double): FootResult? {
+    fun nearestFootOnPolyline(route: List<GeoPoint>, lat: Double, lon: Double): FootResult? {
         if (route.size < 2) return null
         var bestSq = Double.MAX_VALUE
         var bestLat = lat
@@ -121,7 +121,7 @@ object RouteGeometry {
         return FootResult(bestLat, bestLon, bestSq, bestProgress)
     }
 
-    fun corridorViaFromPoi(base: List<LatLng>, poi: OverpassPoint, variant: Int): LatLng? {
+    fun corridorViaFromPoi(base: List<GeoPoint>, poi: OverpassPoint, variant: Int): GeoPoint? {
         val foot = nearestFootOnPolyline(base, poi.lat, poi.lon) ?: return null
         if (base.size < 2) return null
         val n = base.size
@@ -141,10 +141,10 @@ object RouteGeometry {
         var vLon = foot.lon + (poi.lon - foot.lon) * towardPoiBias
         vLat += px * lateralDeg
         vLon += py * lateralDeg
-        return LatLng(vLat, vLon)
+        return GeoPoint(vLat, vLon)
     }
 
-    fun boundingRegion(coords: List<LatLng>): Pair<LatLng, Pair<Double, Double>>? {
+    fun boundingRegion(coords: List<GeoPoint>): Pair<GeoPoint, Pair<Double, Double>>? {
         if (coords.isEmpty()) return null
         var minLat = coords[0].latitude
         var maxLat = coords[0].latitude
@@ -156,7 +156,7 @@ object RouteGeometry {
             minLon = min(minLon, c.longitude)
             maxLon = max(maxLon, c.longitude)
         }
-        val center = LatLng((minLat + maxLat) / 2, (minLon + maxLon) / 2)
+        val center = GeoPoint((minLat + maxLat) / 2, (minLon + maxLon) / 2)
         val latSpan = max((maxLat - minLat) * 1.35, 0.01)
         val lonSpan = max((maxLon - minLon) * 1.35, 0.01)
         return center to (latSpan to lonSpan)

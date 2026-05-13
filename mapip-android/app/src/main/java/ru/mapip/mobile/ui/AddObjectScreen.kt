@@ -32,26 +32,27 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapProperties
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
+import org.osmdroid.views.overlay.Marker
 import ru.mapip.mobile.data.CurrentUserDto
 import ru.mapip.mobile.data.GeocodeHit
 import ru.mapip.mobile.data.MapipRepository
@@ -73,7 +74,7 @@ fun AddObjectScreen(
     var address by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var workingHours by remember { mutableStateOf("") }
-    var coords by remember { mutableStateOf<LatLng?>(null) }
+    var coords by remember { mutableStateOf<GeoPoint?>(null) }
     var mapPick by remember { mutableStateOf(false) }
     var accessibilityOptions by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedAccessibility by remember { mutableStateOf(setOf<String>()) }
@@ -90,8 +91,17 @@ fun AddObjectScreen(
         ActivityResultContracts.PickMultipleVisualMedia(6),
     ) { uris -> imageUris = uris }
 
-    val cameraState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(LatLng(51.533557, 46.034257), 13f)
+    Configuration.getInstance().userAgentValue = ctx.packageName
+    val mapView = remember {
+        MapView(ctx).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            controller.setZoom(13.0)
+            controller.setCenter(GeoPoint(51.533557, 46.034257))
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { mapView.onDetach() }
     }
 
     val disabilityCodes = listOf("Г", "К", "О", "С", "У")
@@ -174,12 +184,12 @@ fun AddObjectScreen(
             )
             addressSuggestions.forEach { s ->
                 Text(
-                    s.display_name,
+                    s.displayName,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .clickable {
-                            address = s.display_name
-                            coords = LatLng(s.lat, s.lon)
+                            address = s.displayName
+                            coords = GeoPoint(s.lat, s.lon)
                             addressSuggestions = emptyList()
                         }
                         .padding(vertical = 4.dp),
@@ -193,23 +203,36 @@ fun AddObjectScreen(
                 Checkbox(mapPick, { mapPick = it })
                 Text("Тап по карте выбирает точку", style = MaterialTheme.typography.bodySmall)
             }
-            GoogleMap(
+            AndroidView(
                 modifier = Modifier.fillMaxWidth().height(220.dp),
-                cameraPositionState = cameraState,
-                properties = MapProperties(),
-                uiSettings = MapUiSettings(zoomControlsEnabled = true),
-                onMapClick = { ll ->
-                    if (mapPick) {
-                        coords = ll
-                        address = String.format("%.6f, %.6f", ll.latitude, ll.longitude)
-                        addressSuggestions = emptyList()
+                factory = { mapView },
+                update = { map ->
+                    map.overlays.clear()
+                    val events = MapEventsOverlay(object : MapEventsReceiver {
+                        override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
+                            if (mapPick) {
+                                coords = p
+                                address = String.format("%.6f, %.6f", p.latitude, p.longitude)
+                                addressSuggestions = emptyList()
+                            }
+                            return true
+                        }
+
+                        override fun longPressHelper(p: GeoPoint): Boolean = false
+                    })
+                    map.overlays.add(events)
+                    coords?.let { c ->
+                        map.controller.animateTo(c)
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = c
+                                title = "Точка"
+                            },
+                        )
                     }
-                },
-            ) {
-                coords?.let { c ->
-                    Marker(state = MarkerState(position = c), title = "Точка")
+                    map.invalidate()
                 }
-            }
+            )
             if (baseType == "Социальная инфраструктура") {
                 Text("Доступная среда", style = MaterialTheme.typography.titleSmall)
                 accessibilityOptions.forEach { a ->
